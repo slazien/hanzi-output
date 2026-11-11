@@ -23,7 +23,9 @@ const notify = (dataChanged = false) => listeners.forEach((fn) => fn(dataChanged
 
 export function initSync() {
   if (!accountsEnabled) return;
-  client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true } });
+  // "implicit" lets a sign-in link from an email work in whichever browser
+  // opens it; the stricter "pkce" flow only works in the browser that asked.
+  client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { flowType: "implicit", detectSessionInUrl: true, persistSession: true } });
   client.auth.onAuthStateChange((event, s) => {
     session = s;
     status.email = s?.user?.email || "";
@@ -50,8 +52,9 @@ export async function signInWithGoogle() {
   if (error) throw new Error(friendly(error));
 }
 
+// Emails a sign-in link (and a 6-digit code, if the project's email template includes one).
 export async function sendEmailCode(email) {
-  const { error } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+  const { error } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } });
   if (error) throw new Error(friendly(error));
 }
 

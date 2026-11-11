@@ -1,6 +1,6 @@
 # Setting up accounts and sync
 
-Accounts are optional and off until a Supabase project is connected. With them on, people can sign in with Google or an emailed 6-digit code, and their progress is saved to their account and kept in step across devices. API keys are never uploaded.
+Accounts are optional and off until a Supabase project is connected. With them on, people can sign in with Google or a link sent by email, and their progress is saved to their account and kept in step across devices. API keys are never uploaded.
 
 All of this can be done in a browser. Menu names in the Supabase and Google consoles change from time to time; the names below are the ones in their documentation at the time of writing.
 
@@ -10,10 +10,11 @@ All of this can be done in a browser. Menu names in the Supabase and Google cons
 2. Open **SQL Editor → New query**, paste the whole of [`supabase/setup.sql`](../supabase/setup.sql) and press **Run**. This creates one table and the rules that let each signed-in user reach only their own row.
 3. Open **Authentication → URL Configuration**. Set **Site URL** to `https://slazien.github.io/hanzi-output/` and add the same address under **Redirect URLs**.
 
-## 2. Email codes
+## 2. Email sign-in
 
-1. Open **Authentication → Emails → Templates → Magic Link** and make sure the message includes the code, for example: `Your code is {{ .Token }}`.
-2. Supabase's built-in sender is limited (a couple of messages an hour, and only to addresses that belong to the project's team). That is enough for the project owner. For other people, add an email service under **Authentication → Emails → SMTP Settings**.
+Nothing to set up for the project owner. Supabase's default email contains a sign-in link, which the app accepts. The link must be opened in the browser where the app is used; if the mail app opens another browser, copy the link and paste it into the right one.
+
+Supabase's built-in sender is limited (a couple of messages an hour, and only to addresses that belong to the project's team). For other people, add an email service under **Authentication → Emails → SMTP Settings**. With custom SMTP the email template can also be edited to include a 6-digit code (`{{ .Token }}`), which the app accepts too.
 
 ## 3. Google sign-in
 

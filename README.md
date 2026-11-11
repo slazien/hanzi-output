@@ -19,7 +19,7 @@ It is a static web app with no server. It can be installed on an iPad from Safar
 
 ## Accounts and sync (optional)
 
-With a Supabase project connected (see [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md)), people can sign in with Google or an emailed code, and their progress syncs across devices. Without it, or without signing in, everything stays on the device.
+With a Supabase project connected (see [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md)), people can sign in with Google or a link sent by email, and their progress syncs across devices. Without it, or without signing in, everything stays on the device.
 
 ## Data and privacy
 
