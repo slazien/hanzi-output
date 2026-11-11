@@ -5,6 +5,8 @@ import { state, save } from "./store.js";
 import { buildKnown, hskAllowed, measure, measureWords, sentenceHsk, hanChars } from "./known.js";
 import { generateSentences, ClaudeError } from "./claude.js";
 import { ALL_THEMES } from "../data/themes.js";
+import { GRAMMAR } from "../data/grammar.js";
+import { loadBank, bankReady, fitting, pick } from "./bank.js";
 
 export const PASS_SCORE = 80;
 const LEGACY_DAYS = [1, 3, 7, 14]; // gaps used by review records saved before self-rating
@@ -41,18 +43,86 @@ function cleanWords(sentence) {
   return words.map((w) => ({ text: w.text.trim(), pinyin: String(w.pinyin || ""), gloss: String(w.gloss || "") })).filter((w) => w.text);
 }
 
+// Sentences come from the stored bank. Writing them with AI is switched off;
+// buildWithAI below is kept so it can be turned back on.
+export const AI_SENTENCES = false;
+
+function grammarRe() {
+  return GRAMMAR.find((g) => g.pattern === state.settings.grammar)?.re || "";
+}
+
+// How many bank sentences fit the current settings (null until the bank loads).
+export function countFitting() {
+  if (!bankReady()) return null;
+  const s = state.settings;
+  return fitting({
+    known: buildKnown(state), allowedNew: hskAllowed(s.hskScheme, s.hskCap),
+    maxNewPct: s.maxNewPct, maxNewWordsPct: s.maxNewWordsPct, theme: s.theme, grammarRe: grammarRe(),
+  }).length;
+}
+
 export async function buildSession(onProgress = () => {}) {
   const s = state.settings;
   const known = buildKnown(state);
   if (!known.chars.size && s.maxNewPct < 100) {
-    throw new ClaudeError("No known characters yet. Import your Hanly export in Settings, or set new characters to 100%.");
+    throw new ClaudeError("No known characters yet. Import your Hanly export in Settings, or set new characters to any.");
   }
-  const allowedNew = hskAllowed(s.hskScheme, s.hskCap);
   const length = s.sessionLength;
-
   const reviews = dueReviews().slice(0, Math.ceil(length / 2));
   const freshNeeded = length - reviews.length;
 
+  let fresh;
+  let notice = "";
+  if (AI_SENTENCES) {
+    fresh = await buildWithAI(freshNeeded, known, reviews, onProgress);
+  } else {
+    onProgress("Choosing sentences…");
+    await loadBank();
+    const rows = fitting({
+      known, allowedNew: hskAllowed(s.hskScheme, s.hskCap),
+      maxNewPct: s.maxNewPct, maxNewWordsPct: s.maxNewWordsPct, theme: s.theme, grammarRe: grammarRe(),
+    });
+    const avoid = new Set([...state.history.slice(0, 300).map((h) => h.chinese), ...state.reviews.map((r) => r.chinese)]);
+    fresh = pick(rows, { count: freshNeeded, weak: (state.weak || []).map((w) => w.text), avoid, spreadThemes: !s.theme })
+      .map((item) => ({ ...item, id: uid(), grammar: s.grammar, hsk: sentenceHsk(item.chinese, s.hskScheme) }));
+    if (fresh.length < freshNeeded) {
+      notice = fresh.length
+        ? `Only ${fresh.length} ${fresh.length === 1 ? "sentence fits" : "sentences fit"} these settings, so this session is shorter. Allow more new characters or words, or pick another theme, to get more.`
+        : "";
+    }
+  }
+
+  const reviewItems = reviews.map((r) => ({
+    id: uid(),
+    reviewId: r.id,
+    english: r.english,
+    chinese: r.chinese,
+    words: r.words || null,
+    grammar: r.grammar || "",
+    theme: r.theme || "",
+    note: r.note || "",
+    src: r.src,
+    ref: r.ref,
+    hsk: sentenceHsk(r.chinese, s.hskScheme),
+  }));
+
+  // Spread the review sentences through the session.
+  const items = [];
+  const rev = [...reviewItems];
+  while (fresh.length || rev.length) {
+    if (fresh.length) items.push(fresh.shift());
+    if (rev.length) items.push(rev.shift());
+  }
+  if (!items.length) {
+    throw new ClaudeError("No sentences in the bank fit these settings. Allow more new characters or words, raise the HSK level, or choose another theme or grammar pattern.");
+  }
+  return { items, notice };
+}
+
+// Writes sentences with the AI model (unused while AI_SENTENCES is false).
+async function buildWithAI(freshNeeded, known, reviews, onProgress) {
+  const s = state.settings;
+  const allowedNew = hskAllowed(s.hskScheme, s.hskCap);
   const accepted = [];
   const rejected = [];
   const avoid = state.history.slice(0, 15).map((h) => h.english);
@@ -72,9 +142,8 @@ export async function buildSession(onProgress = () => {}) {
       hskLabel: hskLabel(),
       grammar: s.grammar,
       theme: s.theme,
-      focus: (state.weak || []).slice(0, 8).map((w) => w.text),
-      // For a random mix, draw the themes here so the spread is really random.
       themes: s.theme ? null : shuffle(ALL_THEMES).slice(0, missing + 2),
+      focus: (state.weak || []).slice(0, 8).map((w) => w.text),
       avoid: [...avoid, ...accepted.map((a) => a.english)],
       feedback,
     });
@@ -92,7 +161,6 @@ export async function buildSession(onProgress = () => {}) {
         note: String(c.note || "").trim(), hsk: sentenceHsk(c.chinese, s.hskScheme),
       };
       const overPct = m.pct > s.maxNewPct + 0.01;
-      // The word limit can only be checked when the word breakdown is usable.
       const limitWords = s.maxNewWordsPct < 100;
       const mw = words ? measureWords(words, known) : null;
       const overWords = limitWords && (!mw || mw.pct > s.maxNewWordsPct + 0.01);
@@ -109,9 +177,6 @@ export async function buildSession(onProgress = () => {}) {
       feedback.push(`${c.chinese} — ${reasons.join("; ")}`);
     }
   }
-
-  // If Claude could not stay inside the limit after several tries, use the
-  // closest sentences and say so rather than end up with a short session.
   if (accepted.length < freshNeeded) {
     rejected.sort((a, b) => a.excess - b.excess);
     for (const r of rejected) {
@@ -119,29 +184,7 @@ export async function buildSession(onProgress = () => {}) {
       accepted.push({ ...r.item, overLimit: true });
     }
   }
-
-  const reviewItems = reviews.map((r) => ({
-    id: uid(),
-    reviewId: r.id,
-    english: r.english,
-    chinese: r.chinese,
-    words: r.words || null,
-    grammar: r.grammar || "",
-    theme: r.theme || "",
-    note: r.note || "",
-    hsk: sentenceHsk(r.chinese, s.hskScheme),
-  }));
-
-  // Spread the review sentences through the session.
-  const items = [];
-  const fresh = [...accepted];
-  const rev = [...reviewItems];
-  while (fresh.length || rev.length) {
-    if (fresh.length) items.push(fresh.shift());
-    if (rev.length) items.push(rev.shift());
-  }
-  if (!items.length) throw new ClaudeError("The model did not return any usable sentences. Try again.");
-  return items;
+  return accepted;
 }
 
 // ---------- self-rated spaced review ----------
@@ -213,6 +256,8 @@ export function scheduleReview(item, rating, now = Date.now()) {
       grammar: item.grammar,
       theme: item.theme || "",
       note: item.note || "",
+      src: item.src,
+      ref: item.ref,
     };
     state.reviews.push(record);
     item.reviewId = record.id;
@@ -259,6 +304,8 @@ export function recordAttempt(item, answer, grade) {
     words: item.words || null,
     sentenceNote: item.note || "",
     hsk: item.hsk || "",
+    src: item.src,
+    ref: item.ref,
     theme: item.theme || "",
     grammar: item.grammar || "",
     answer,
