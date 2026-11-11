@@ -17,9 +17,13 @@ It is a static web app with no server. It can be installed on an iPad from Safar
 - **History** – every attempt with its feedback.
 - **Settings** – model (Anthropic or OpenAI), API key, Hanly import, which Hanly score counts as "known" and its cut-off, HSK version, backup and restore.
 
+## Accounts and sync (optional)
+
+With a Supabase project connected (see [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md)), people can sign in with Google or an emailed code, and their progress syncs across devices. Without it, or without signing in, everything stays on the device.
+
 ## Data and privacy
 
-- Everything is stored in the browser's local storage on the device. There are no accounts and no sync; use *Download backup* / *Restore* to move data between devices.
+- Everything is stored in the browser's local storage on the device. Unless accounts are set up and you sign in, nothing is synced; use *Download backup* / *Restore* to move data between devices.
 - API keys are stored on the device, are sent only to their own provider (`api.anthropic.com` or `api.openai.com`), and are left out of backups.
 - The Hanly file is read on the device. Only the sentence being graded, your answer and your follow-up questions are sent to the selected provider.
 

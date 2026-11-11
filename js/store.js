@@ -19,6 +19,7 @@ export const DEFAULTS = {
     grammar: "", // pattern text, "" = any
     theme: "", // one theme, or "" for a random mix
   },
+  settingsAt: 0, // when the settings last changed (for sync)
   onboarded: false, // first-run setup finished or skipped
   hanly: null, // { importedAt, fileName, entries: { key: progressPercent } }
   extraKnown: "", // characters the user marked as known in this app
@@ -47,10 +48,22 @@ function read() {
 
 export const state = read();
 
+// Called after every save, for sync.
+const saveListeners = new Set();
+export const onSave = (fn) => saveListeners.add(fn);
+let savedSettings = JSON.stringify(state.settings);
+
 export function save() {
   if (state.history.length > HISTORY_LIMIT) state.history.length = HISTORY_LIMIT;
+  // Note when the settings last changed, so two devices can tell whose are newer.
+  const settingsNow = JSON.stringify(state.settings);
+  if (settingsNow !== savedSettings) {
+    savedSettings = settingsNow;
+    state.settingsAt = Date.now();
+  }
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
+    saveListeners.forEach((fn) => fn());
     return true;
   } catch {
     return false;
@@ -77,6 +90,18 @@ export function setApiKey(value, provider = "anthropic") {
   try {
     if (value) localStorage.setItem(API_KEYS[provider], value);
     else localStorage.removeItem(API_KEYS[provider]);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+// Replaces everything with a merged copy from sync, without counting it as a local change.
+export function replaceState(next) {
+  for (const k of Object.keys(state)) delete state[k];
+  Object.assign(state, structuredClone(DEFAULTS), next, { settings: { ...DEFAULTS.settings, ...(next.settings || {}) } });
+  savedSettings = JSON.stringify(state.settings);
+  try {
+    localStorage.setItem(KEY, JSON.stringify(state));
   } catch {
     /* storage unavailable */
   }
