@@ -4,11 +4,12 @@ import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, te
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
+import { accountsEnabled, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow } from "./sync.js";
 import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 
 const main = document.getElementById("main");
 
@@ -933,6 +934,53 @@ async function runConnectionTest() {
   }
 }
 
+// Settings → Account. Signing in is optional; without it everything stays on this device.
+const account = { email: "", codeSent: false, busy: false };
+function accountCard() {
+  if (!accountsEnabled) return null;
+  const run = async (fn, okText) => {
+    account.busy = true; flash = null; render();
+    try { await fn(); account.busy = false; if (okText) note("account", "ok", okText); else render(); }
+    catch (error) { account.busy = false; note("account", "error", error.message); }
+  };
+  if (syncStatus.email) {
+    const when = syncStatus.syncing ? "Syncing…" : syncStatus.lastSync ? `Last synced ${new Date(syncStatus.lastSync).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.` : "Not synced yet.";
+    return h("section", { class: "card" },
+      h("h2", {}, "Account"),
+      flashFor("account"),
+      syncStatus.error && h("div", { class: "notice error", role: "alert" }, syncStatus.error),
+      h("p", {}, "Signed in as ", h("b", {}, syncStatus.email), ". ", h("span", { class: "muted", id: "syncwhen" }, when)),
+      h("p", { class: "small muted" }, "Your progress is saved to your account and kept in step on every device where you sign in. API keys stay on each device and are never uploaded."),
+      h("div", { class: "row" },
+        h("button", { class: "btn", type: "button", disabled: syncStatus.syncing, onclick: () => syncNow() }, "Sync now"),
+        h("button", { class: "btn", type: "button", disabled: account.busy, onclick: () => run(signOut, "") }, "Sign out")));
+  }
+  const email = h("input", { type: "text", id: "acct-email", inputmode: "email", autocomplete: "email", autocapitalize: "off", placeholder: "you@example.com", value: account.email, oninput: (e) => { account.email = e.target.value.trim(); } });
+  const code = h("input", { type: "text", id: "acct-code", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "6-digit code" });
+  return h("section", { class: "card" },
+    h("h2", {}, "Account"),
+    flashFor("account"),
+    h("p", { class: "small muted" }, "Optional. Sign in to keep your progress safe and in step across devices. What is on this device now is combined with your account, not replaced."),
+    h("div", { class: "field" }, h("button", { class: "btn wide", type: "button", id: "acct-google", disabled: account.busy, onclick: () => run(signInWithGoogle, "") }, "Continue with Google")),
+    h("div", { class: "field" },
+      h("label", { for: "acct-email" }, "Or sign in by email"),
+      email,
+      h("div", { class: "hint" }, "We email you a 6-digit code. No password.")),
+    !account.codeSent
+      ? h("button", { class: "btn", type: "button", id: "acct-send", disabled: account.busy, onclick: () => {
+          if (!/^\S+@\S+\.\S+$/.test(account.email)) return note("account", "error", "Enter your email address first.");
+          run(async () => { await sendEmailCode(account.email); account.codeSent = true; }, `Code sent to ${account.email}. It can take a minute to arrive.`);
+        } }, "Email me a code")
+      : [h("div", { class: "field" }, h("label", { for: "acct-code" }, "Code from the email"), code),
+        h("div", { class: "row" },
+          h("button", { class: "btn primary", type: "button", id: "acct-verify", disabled: account.busy, onclick: () => {
+            const token = code.value.replace(/\D/g, "");
+            if (token.length < 6) return note("account", "error", "Enter the 6-digit code from the email.");
+            run(async () => { await verifyEmailCode(account.email, token); account.codeSent = false; }, "");
+          } }, "Sign in"),
+          h("button", { class: "btn quiet", type: "button", onclick: () => { account.codeSent = false; flash = null; render(); } }, "Use a different email"))]);
+}
+
 function settingsView() {
   const s = state.settings;
   const set = (key, value) => { s[key] = value; save(); flash = null; render(); };
@@ -1073,7 +1121,7 @@ function settingsView() {
     h("p", { class: "small muted", id: "version" }, MODULE_VERSION === APP_VERSION
       ? `App version ${APP_VERSION}.`
       : `App version ${APP_VERSION}, but an older part (${MODULE_VERSION}) is still loaded. Reload the page.`));
-  return [apiCard, hanlyCard, hskCard, dataCard, dangerCard, about];
+  return [accountCard(), apiCard, hanlyCard, hskCard, dataCard, dangerCard, about].filter(Boolean);
 }
 
 function downloadBackup() {
@@ -1087,6 +1135,14 @@ function downloadBackup() {
 }
 
 // ---------- start ----------
+
+// Accounts: refresh the screen when the sign-in state or synced data changes,
+// but never while an answer is being typed or graded.
+initSync();
+onSyncChange((dataChanged) => {
+  const busy = view === "practice" && ["answer", "grading", "feedback", "loading"].includes(P.phase);
+  if (view === "settings" || (dataChanged && !busy)) render();
+});
 
 // Devices that practised before the attempt log existed: rebuild it from the detailed history.
 if (!(state.log || []).length && state.history.length) {
