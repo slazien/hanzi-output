@@ -523,3 +523,24 @@ a.tab { display: inline-flex; align-items: center; color: var(--muted); }
 
 .noscript { padding: 24px; text-align: center; }
 [hidden] { display: none !important; }
+
+/* Hints stack up as they are revealed. */
+.hintline > div + div { margin-top: 4px; }
+
+/* Spot the difference: characters to tap. */
+.spot { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.spot-ch { font: inherit; color: inherit; background: var(--soft); border: 2px solid transparent; border-radius: 8px; min-width: 44px; min-height: 48px; padding: 2px 6px; cursor: pointer; }
+.spot-ch[aria-pressed="true"] { background: var(--warn-soft); border-color: var(--warn); }
+.repeat-cue { margin: 6px 0 0; }
+
+/* Weekly goal. */
+.goal { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; }
+.goal-days { display: flex; gap: 4px; }
+.goal-day { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 0.72rem; font-weight: 700; color: var(--muted); background: var(--soft); }
+.goal-day.done { background: var(--good); color: var(--card); }
+.goal-day.today { outline: 2px solid var(--line); outline-offset: 1px; }
+.goal-off { margin: 0 0 16px; }
+ul.points.recovered { list-style: none; padding-left: 0; }
+ul.points.recovered li { margin-bottom: 8px; }
+.spot + .row, .line-zh + .row { margin-top: 16px; }
+ul.points + .goal { margin-top: 14px; }

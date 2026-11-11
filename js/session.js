@@ -7,7 +7,7 @@ import { generateSentences, ClaudeError } from "./claude.js";
 import { ALL_THEMES } from "../data/themes.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, fitting, pick, variantOf } from "./bank.js";
-import { focusFilter } from "./insight.js";
+import { focusFilter, weakAreas } from "./insight.js";
 import { review as fsrsReview, intervalFor, retrievability } from "./fsrs.js";
 
 export const PASS_SCORE = 80;
@@ -63,6 +63,33 @@ function grammarRe() {
   return GRAMMAR.find((g) => g.pattern === state.settings.grammar)?.re || "";
 }
 
+// The grammar patterns a sentence exercises: the most advanced ones it matches
+// (at most two). HSK 1 patterns such as 是 or 的 are in nearly every sentence
+// and say little, so they are left out.
+const PATTERN_TESTS = GRAMMAR.filter((g) => g.level >= 2).map((g) => ({ pattern: g.pattern, level: g.level, re: new RegExp(g.re) })).sort((a, b) => b.level - a.level);
+export function patternsOf(chinese) {
+  const out = [];
+  for (const p of PATTERN_TESTS) {
+    if (p.re.test(chinese)) out.push(p.pattern);
+    if (out.length === 2) break;
+  }
+  return out;
+}
+
+// Orders sentences so that neighbours practise different patterns: mixing
+// patterns makes each one be chosen, not just repeated.
+function interleave(items) {
+  const left = shuffle(items);
+  const out = [];
+  while (left.length) {
+    const prev = out[out.length - 1]?.patterns || [];
+    let i = left.findIndex((it) => !(it.patterns || []).some((p) => prev.includes(p)));
+    if (i < 0) i = 0;
+    out.push(left.splice(i, 1)[0]);
+  }
+  return out;
+}
+
 // How many bank sentences fit the current settings (null until the bank loads).
 export function countFitting() {
   if (!bankReady()) return null;
@@ -102,7 +129,7 @@ export async function buildSession(onProgress = () => {}, focus = null) {
     onProgress("Choosing sentences…");
     await loadBank();
     const weak = (state.weak || []).map((w) => w.text);
-    const decorate = (item) => ({ ...item, id: uid(), grammar: s.grammar, hsk: sentenceHsk(item.chinese, s.hskScheme) });
+    const decorate = (item) => ({ ...item, id: uid(), grammar: s.grammar, hsk: sentenceHsk(item.chinese, s.hskScheme), patterns: patternsOf(item.chinese) });
     if (focus) {
       const filter = focusFilter(focus);
       // When the focus is a word, its own characters do not count against the
@@ -115,12 +142,22 @@ export async function buildSession(onProgress = () => {}, focus = null) {
       const focused = pick(focusRows, { count: Math.min(freshNeeded, Math.ceil(length * 0.6)), weak, avoid }).map((i) => ({ ...decorate(i), grammar: focus.kind === "grammar" ? focus.key : "", focus: focus.label }));
       const taken = new Set([...avoid, ...focused.map((i) => i.chinese)]);
       const others = pick(rows, { count: freshNeeded - focused.length, weak, avoid: taken, spreadThemes: true }).map((i) => ({ ...decorate(i), grammar: "" }));
-      fresh = shuffle([...focused, ...others]);
+      fresh = interleave([...focused, ...others]);
       if (!focused.length) notice = `No sentences in the bank target “${focus.label}” within your current limits, so this is an ordinary session.`;
       else if (focused.length < Math.ceil(length * 0.6) && focused.length < freshNeeded) notice = `Only ${focused.length} ${focused.length === 1 ? "sentence targets" : "sentences target"} “${focus.label}” within your current limits; the rest are ordinary sentences.`;
     } else {
       rows = fitting({ ...base, theme: s.theme, grammarRe: grammarRe() });
-      fresh = pick(rows, { count: freshNeeded, weak, avoid, spreadThemes: !s.theme }).map(decorate);
+      // A grammar pattern that has been going badly comes back in a few
+      // different sentences, mixed in with the rest.
+      let again = [];
+      const weakPattern = s.grammar ? null : weakAreas(state.log || []).find((a) => a.kind === "grammar");
+      if (weakPattern) {
+        const re = GRAMMAR.find((g) => g.pattern === weakPattern.key)?.re;
+        const matching = re ? fitting({ ...base, theme: s.theme, grammarRe: re }) : [];
+        again = pick(matching, { count: Math.min(freshNeeded, Math.max(1, Math.round(freshNeeded * 0.3))), avoid }).map(decorate);
+      }
+      const taken = new Set([...avoid, ...again.map((i) => i.chinese)]);
+      fresh = interleave([...again, ...pick(rows, { count: freshNeeded - again.length, weak, avoid: taken, spreadThemes: !s.theme }).map(decorate)]);
       if (fresh.length && fresh.length < freshNeeded) {
         notice = `Only ${fresh.length} ${fresh.length === 1 ? "sentence fits" : "sentences fit"} these settings, so this session is shorter. Allow more new characters or words, or pick another theme, to get more.`;
       }
@@ -141,12 +178,13 @@ export async function buildSession(onProgress = () => {}, focus = null) {
       src: r.src,
       ref: r.ref,
       hsk: sentenceHsk(r.chinese, s.hskScheme),
+      patterns: patternsOf(r.chinese),
     };
     // Well-established sentences are sometimes reviewed through a different
     // sentence with the same words, so the wording is not learned by heart.
     if (r.s >= VARY_AFTER_DAYS && Math.random() < VARY_CHANCE) {
       const variant = variantOf(r.chinese, r.words, everything, avoid);
-      if (variant) return { ...item, ...variant, grammar: "", hsk: sentenceHsk(variant.chinese, s.hskScheme), variantOf: r.chinese };
+      if (variant) return { ...item, ...variant, grammar: "", hsk: sentenceHsk(variant.chinese, s.hskScheme), patterns: patternsOf(variant.chinese), variantOf: r.chinese };
     }
     return item;
   });
@@ -328,6 +366,9 @@ export function scheduleReview(item, rating, now = Date.now()) {
   record.last = now;
   record.due = now + next.gap * DAY;
   record.reps = (record.reps || 0) + 1;
+  // The last real rating, to notice a sentence that was missed and is now
+  // recalled. A retry straight after seeing the answer does not count.
+  if (!item.tries) record.lr = GRADE[rating];
   if (rating === "forgot") record.lapses = (record.lapses || 0) + 1;
   save();
   return rating === "forgot" || (rating === "hard" && first);
@@ -338,12 +379,15 @@ export function scheduleReview(item, rating, now = Date.now()) {
 // history, for the Progress screen and for finding weak areas.
 const LOG_LIMIT = 6000;
 
-export function logAttempt(item, grade, rating, wasReview, gapBefore, now = Date.now()) {
+export function logAttempt(item, grade, rating, wasReview, gapBefore, hints = 0, now = Date.now()) {
   const hsk = Number(String(item.hsk || "").replace(/\D+/g, "").slice(0, 1)) || 0;
   const entry = { t: now, sc: grade.skipped ? null : grade.score, r: GRADE[rating] };
   if (item.theme) entry.th = item.theme;
   if (hsk) entry.h = hsk;
   if (item.grammar) entry.g = item.grammar;
+  const patterns = (item.patterns || []).filter((p) => p !== item.grammar);
+  if (patterns.length) entry.p = patterns;
+  if (hints) entry.hn = hints;
   const cats = [...new Set((grade.issues || []).map((i) => i.category).filter(Boolean))];
   if (grade.naturalness === "unnatural" || (grade.naturalness === "acceptable_marked" && grade.naturalnessSure)) cats.push("natural");
   if (cats.length) entry.c = cats;

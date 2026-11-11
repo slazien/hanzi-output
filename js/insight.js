@@ -49,6 +49,10 @@ function missOf(e) {
   return 0;
 }
 
+// Grammar patterns an attempt exercised: the one chosen for the session and
+// the ones found in the sentence.
+const patternsIn = (e) => [...new Set([e.g, ...(e.p || [])].filter(Boolean))];
+
 // ---------- weak areas ----------
 // Each area keeps a time-decayed count of attempts and misses (half-life two
 // weeks), smoothed so one bad sentence cannot put an area at the top.
@@ -77,7 +81,7 @@ export function weakAreas(log, now = Date.now()) {
     total += w;
     totalMiss += w * miss;
     if (e.th) bump("theme", e.th, w, miss);
-    if (e.g) bump("grammar", e.g, w, miss);
+    for (const g of patternsIn(e)) bump("grammar", g, w, miss);
     if (e.sc != null) {
       graded += w;
       for (const c of e.c || []) bump("category", c, w, 1);
@@ -142,12 +146,15 @@ export function weeklyScores(log, weeks = 8, now = Date.now()) {
 export function breakdown(log, field, days = 60, minN = 5, now = Date.now()) {
   const groups = new Map();
   for (const e of log) {
-    if (now - e.t > days * DAY || e[field] == null) continue;
-    const g = groups.get(e[field]) || { key: e[field], n: 0, scores: [], miss: 0 };
-    g.n += 1;
-    if (e.sc != null) g.scores.push(e.sc);
-    g.miss += missOf(e);
-    groups.set(e[field], g);
+    if (now - e.t > days * DAY) continue;
+    const keys = field === "g" ? patternsIn(e) : e[field] == null ? [] : [e[field]];
+    for (const key of keys) {
+      const g = groups.get(key) || { key, n: 0, scores: [], miss: 0 };
+      g.n += 1;
+      if (e.sc != null) g.scores.push(e.sc);
+      g.miss += missOf(e);
+      groups.set(key, g);
+    }
   }
   return [...groups.values()]
     .filter((g) => g.n >= minN)
@@ -176,4 +183,81 @@ export function calendar(log, weeks = 12, now = Date.now()) {
     if (i >= 0 && i < days) counts[i] += 1;
   }
   return counts.map((n, i) => ({ date: today - (days - 1 - i) * DAY, n }));
+}
+
+// ---------- weekly goal ----------
+
+// The days of the current week (Monday first) and whether each was practised.
+export function weekDays(log, now = Date.now()) {
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  const out = [];
+  for (let d = 0; d < 7; d++) {
+    const start = new Date(monday);
+    start.setDate(monday.getDate() + d);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 1);
+    out.push({ date: start.getTime(), done: log.some((e) => e.t >= start.getTime() && e.t < end.getTime()), today: start.getTime() === today.getTime(), future: start.getTime() > today.getTime() });
+  }
+  return out;
+}
+
+// ---------- what a session showed ----------
+// Plain statements of fact about a finished session, each backed by the log.
+// Nothing is returned when there is nothing true to say.
+//   results: [{ item, grade, rating, hints, before }] in the order answered
+//   log: attempts from before the session started
+export function sessionNotes(results, log, now = Date.now()) {
+  const notes = [];
+  const firsts = results.filter((r) => !r.item.tries);
+  const passed = (r) => r.rating === "recalled" || r.rating === "easy";
+
+  // Sentences that were missed last time and recalled now.
+  const recovered = firsts.filter((r) => r.before && r.before.missed && passed(r));
+
+  // Themes and grammar patterns that went clearly better than over the last month.
+  const prior = log.filter((e) => now - e.t <= 30 * DAY);
+  const areas = new Map();
+  for (const r of firsts) {
+    const keys = [r.item.theme && ["th", r.item.theme], ...[...new Set([r.item.grammar, ...(r.item.patterns || [])].filter(Boolean))].map((p) => ["g", p])].filter(Boolean);
+    for (const [kind, key] of keys) {
+      const a = areas.get(kind + key) || { kind, key, n: 0, ok: 0 };
+      a.n += 1;
+      if (passed(r)) a.ok += 1;
+      areas.set(kind + key, a);
+    }
+  }
+  const better = [];
+  for (const a of areas.values()) {
+    if (a.n < 2) continue;
+    const before = prior.filter((e) => (a.kind === "th" ? e.th === a.key : patternsIn(e).includes(a.key)));
+    if (before.length < 4) continue;
+    const was = before.filter((e) => e.r >= 3).length / before.length;
+    const now_ = a.ok / a.n;
+    if (was <= 0.6 && now_ - was >= 0.25) better.push({ ...a, was, gain: now_ - was });
+  }
+  better.sort((x, y) => y.gain - x.gain);
+  for (const a of better.slice(0, 2)) {
+    notes.push({ hanzi: a.kind === "g", label: a.key, text: `${a.ok} of ${a.n} recalled this session. Over the last month it was ${Math.round(a.was * 100)}% of ${before_n(prior, a)}.` });
+  }
+
+  // The session's average score against the last month's.
+  const scores = firsts.filter((r) => !r.grade.skipped).map((r) => r.grade.score);
+  const earlier = prior.filter((e) => e.sc != null).map((e) => e.sc);
+  if (scores.length >= 3 && earlier.length >= 20) {
+    const diff = Math.round(mean(scores) - mean(earlier));
+    if (diff >= 5) notes.push({ label: "Average score", text: `${Math.round(mean(scores))} this session, ${diff} points above your average for the last month (${Math.round(mean(earlier))}).` });
+  }
+
+  // Answers that needed no help.
+  const unaided = firsts.filter((r) => passed(r) && !r.hints && !r.grade.skipped).length;
+  if (firsts.length >= 3 && unaided) notes.push({ label: "Without hints", text: `${unaided} of ${firsts.length} ${firsts.length === 1 ? "sentence" : "sentences"} recalled with no hint.` });
+
+  return { recovered, notes };
+}
+function before_n(prior, a) {
+  const n = prior.filter((e) => (a.kind === "th" ? e.th === a.key : patternsIn(e).includes(a.key))).length;
+  return `${n} ${n === 1 ? "sentence" : "sentences"}`;
 }

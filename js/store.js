@@ -17,6 +17,8 @@ export const DEFAULTS = {
     hskScheme: "new", // new = HSK 3.0, old = HSK 2.0
     hskCap: 2, // 1-6, or 0 for no cap
     sessionLength: 10,
+    weeklyGoal: 0, // practice days aimed for each week; 0 = no goal
+    spotFirst: true, // find the change yourself before the explanation
     grammar: "", // pattern text, "" = any
     theme: "", // one theme, or "" for a random mix
   },

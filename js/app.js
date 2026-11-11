@@ -6,11 +6,11 @@ import { GRAMMAR } from "../data/grammar.js";
 import { MEANING_LABEL, ACCURACY_LABEL, NATURALNESS_LABEL, CONVENTIONS } from "./grading.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
 import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow, deleteSynced } from "./sync.js";
-import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORY_LABELS as CATEGORIES } from "./insight.js";
+import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, weekDays, sessionNotes, CATEGORY_LABELS as CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 23;
+const APP_VERSION = 24;
 
 const main = document.getElementById("main");
 
@@ -269,6 +269,7 @@ function setupView() {
   return h("section", { class: "card" },
     h("h1", {}, "Sentence practice"),
     h("p", { class: "lede" }, `${due} due for review · ${known.chars.size} characters known`),
+    weekGoal(true),
     !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key so your answers can be graded. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     !known.chars.size && h("div", { class: "notice" }, "The app does not know which characters you know yet. Choose your level or import a Hanly file. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
@@ -299,6 +300,29 @@ function setupView() {
       h("div", { class: "field" },
         h("label", { for: "grammar" }, "Grammar pattern"),
         grammarSelect)));
+}
+
+// The weekly goal: a number of practice days, Monday to Sunday. Nothing is
+// lost when a week falls short; the dots just show the week so far.
+function weekGoal(editable = false) {
+  const goal = state.settings.weeklyGoal;
+  const pickGoal = (n) => { state.settings.weeklyGoal = n; save(); render(); };
+  if (!goal) {
+    return editable ? h("p", { class: "muted small goal-off" }, "Weekly goal: ",
+      [3, 4, 5, 7].map((n) => [h("button", { class: "linkish", type: "button", onclick: () => pickGoal(n) }, `${n} days`), " "]),
+      "a week. No penalty for missing it.") : null;
+  }
+  const days = weekDays(state.log || []);
+  const done = days.filter((d) => d.done).length;
+  const left = days.filter((d) => !d.done && (d.today || d.future)).length;
+  const text = done >= goal ? `Goal reached: ${done} of ${goal} days this week.`
+    : done + left < goal ? `${done} of ${goal} days this week.`
+      : `${done} of ${goal} days this week; ${goal - done} to go.`;
+  return h("div", { class: "goal" },
+    h("div", { class: "goal-days", role: "img", "aria-label": text },
+      days.map((d, i) => h("span", { class: `goal-day${d.done ? " done" : ""}${d.today ? " today" : ""}` }, "MTWTFSS"[i]))),
+    h("span", { class: "small" }, text),
+    editable && h("button", { class: "linkish muted small", type: "button", onclick: () => go("settings") }, "Change"));
 }
 
 // Weak areas found in recent practice, each with a button for a focused session.
@@ -334,7 +358,7 @@ async function startSession(focus = null) {
 }
 
 function beginSession(items, notice = "") {
-  P = { phase: "answer", items, index: 0, results: [], draft: "", hintLevel: 0, newShown: false, notice };
+  P = { phase: "answer", items, index: 0, results: [], draft: "", hintLevel: 0, newShown: false, notice, startedAt: Date.now() };
   render();
   window.scrollTo(0, 0);
   focusAnswer();
@@ -405,14 +429,10 @@ function answerView() {
         h("ul", {}, fresh.map((w) => h("li", {}, h("span", { class: "hanzi nw", lang: "zh-Hans" }, w.text), h("span", { class: "muted" }, ` ${w.pinyin}`), w.gloss ? ` — ${w.gloss}` : "")))]
       : h("button", { class: "linkish", type: "button", onclick: () => { P.newShown = true; render(); focusAnswer(); } }, fresh.length === 1 ? "Show the 1 new word" : `Show the ${fresh.length} new words`)) : null;
 
-  // Hints: first word, then the pinyin of the whole sentence.
-  const words = (item.words || []).filter((w) => hanChars(w.text).length);
-  const maxHint = words.length ? 2 : 1;
-  const hintText = P.hintLevel >= 2
-    ? [h("span", { class: "muted" }, "Pinyin: "), words.map((w) => w.pinyin).join(" ")]
-    : P.hintLevel === 1
-      ? [h("span", { class: "muted" }, "Starts with: "), h("span", { class: "hanzi nw", lang: "zh-Hans" }, words.length ? words[0].text : [...item.chinese][0]), "…"]
-      : null;
+  // Hints come in steps, the smallest help first; each stays on screen.
+  const hints = hintsFor(item);
+  const maxHint = hints.length;
+  const hintText = P.hintLevel ? hints.slice(0, P.hintLevel).map((x) => h("div", {}, x.node)) : null;
 
   return h("section", { class: "card" },
     progressBar(),
@@ -446,6 +466,26 @@ async function submitAnswer() {
   }
 }
 
+// The hint ladder for a sentence, from least to most help. `cap` is the best
+// rating the app will suggest once that hint has been used.
+function hintsFor(item) {
+  const words = (item.words || []).filter((w) => hanChars(w.text).length);
+  const label = (t) => h("span", { class: "muted" }, t);
+  const zh = (t) => h("span", { class: "hanzi nw", lang: "zh-Hans" }, t);
+  if (!words.length) return [{ cap: "hard", node: [label("Starts with: "), zh([...item.chinese][0]), "…"] }];
+  const out = [];
+  const name = item.grammar || (item.patterns || [])[0];
+  const g = name && GRAMMAR.find((x) => x.pattern === name);
+  out.push({ cap: "recalled", node: [label("Shape: "), `${words.length} ${words.length === 1 ? "word" : "words"}`, g ? [", using ", zh(g.pattern), ` (${g.name})`] : ""] });
+  // One key word: a new word if there is one, otherwise the most advanced.
+  const weight = (w) => (isKnownWord(w.text, known) ? 0 : 100) + Math.max(...hanChars(w.text).map((c) => hskLevelOf(c, state.settings.hskScheme) || 8)) * 10 + hanChars(w.text).length;
+  const key = words.slice(1).filter((w) => w.gloss).sort((a, b) => weight(b) - weight(a))[0];
+  if (key && words.length > 2) out.push({ cap: "recalled", node: [label("Key word: "), `${key.gloss} = `, zh(key.text), key.pinyin ? ` ${key.pinyin}` : ""] });
+  out.push({ cap: "hard", node: [label("Starts with: "), zh(words[0].text), "…"] });
+  out.push({ cap: "hard", node: [label("Pinyin: "), words.map((w) => w.pinyin).join(" ")] });
+  return out;
+}
+
 function skipAnswer() {
   const item = P.items[P.index];
   finishItem(item, "", { score: 0, verdict: "Answer shown", corrected: "", strengths: [], issues: [], weak: [], note: "", skipped: true });
@@ -457,11 +497,11 @@ function finishItem(item, answer, grade) {
   // A hint means the sentence was not fully recalled, whatever the score.
   let suggested = suggestRating(grade);
   const order = RATINGS.map((r) => r.id);
-  const cap = P.hintLevel >= 2 ? "hard" : P.hintLevel === 1 ? "recalled" : "easy";
+  const cap = P.hintLevel ? hintsFor(item)[P.hintLevel - 1]?.cap || "hard" : "easy";
   if (order.indexOf(suggested) > order.indexOf(cap)) suggested = cap;
-  const result = { item, answer, grade, rating: null };
+  const result = { item, answer, grade, rating: null, hints: P.hintLevel };
   P.results.push(result);
-  P.current = { item, answer, grade, result, suggested, rated: false, thread: [], selected: -1, retry: null };
+  P.current = { item, answer, grade, result, suggested, rated: false, thread: [], selected: -1, retry: null, spot: spotFor(answer, grade) };
   P.phase = "feedback";
   P.error = "";
   render();
@@ -500,11 +540,11 @@ const diffLine = (marks, cls) => marks.map((c) => (c.same ? c.ch : h("span", { c
 // ---------- audio ----------
 
 const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
-function speak(text) {
+function speak(text, rate = 0.9) {
   if (!canSpeak) return;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "zh-CN";
-  u.rate = 0.9;
+  u.rate = rate;
   const voice = speechSynthesis.getVoices().find((v) => /^zh([-_](CN|Hans))?/i.test(v.lang));
   if (voice) u.voice = voice;
   speechSynthesis.cancel();
@@ -514,7 +554,10 @@ function speak(text) {
 // The reference sentence, Hanly-style: pinyin above each word, words you know
 // underlined, new words dotted. Tap a word for its meaning.
 function referenceBlock(item, cur) {
-  const listen = canSpeak ? h("button", { class: "linkish muted small", type: "button", onclick: () => speak(item.chinese) }, "Listen") : null;
+  const listen = canSpeak ? [
+    h("button", { class: "linkish muted small", type: "button", onclick: () => speak(item.chinese) }, "Listen"),
+    h("button", { class: "linkish muted small", type: "button", onclick: () => speak(item.chinese, 0.6) }, "Slower"),
+  ] : null;
   if (!item.words) return h("div", {}, h("p", { class: "line-zh", lang: "zh-Hans" }, item.chinese), listen);
   const showPinyin = state.settings.showPinyin;
 
@@ -653,9 +696,58 @@ function retryView(cur) {
       h("button", { class: r.checked ? "btn primary grow" : "btn", type: "button", onclick: () => { cur.retry = null; render(); window.scrollTo(0, 0); } }, "Back to feedback")));
 }
 
+// "Spot the difference": before the explanation, the learner taps what the
+// correction changed. Finding it yourself makes it more likely to be noticed.
+function spotFor(answer, grade) {
+  if (!state.settings.spotFirst || grade.skipped || !grade.corrected || hanOnly(grade.corrected) === hanOnly(answer)) return null;
+  const [mine, fixed] = diffChars(answer, grade.corrected);
+  const han = (marks) => marks.filter((c) => isHan(c.ch));
+  // Tap in the corrected sentence, or in your own when the fix only removed something.
+  const useFixed = han(fixed).some((c) => !c.same);
+  const marks = useFixed ? fixed : mine;
+  const targets = han(marks).filter((c) => !c.same).length;
+  // A sentence that was mostly rewritten has nothing small to find.
+  if (!targets || targets > han(marks).length * 0.6) return null;
+  return { marks, useFixed, picked: new Set(), done: false, targets };
+}
+
+function spotView(cur) {
+  const { spot } = cur;
+  const finish = (skipped) => {
+    spot.done = true;
+    spot.skipped = skipped;
+    spot.hit = [...spot.picked].filter((i) => !spot.marks[i].same).length;
+    spot.extra = spot.picked.size - spot.hit;
+    render();
+    window.scrollTo(0, 0);
+  };
+  const check = h("button", { class: "btn primary grow", type: "button", id: "spot-check", disabled: !spot.picked.size, onclick: () => finish(false) }, "Check");
+  const chars = spot.marks.map((c, i) => (isHan(c.ch)
+    ? h("button", { class: "spot-ch", type: "button", "aria-pressed": String(spot.picked.has(i)), onclick: (e) => {
+      if (spot.picked.has(i)) spot.picked.delete(i); else spot.picked.add(i);
+      e.currentTarget.setAttribute("aria-pressed", String(spot.picked.has(i)));
+      check.disabled = !spot.picked.size;
+    } }, c.ch)
+    : h("span", {}, c.ch)));
+  return h("section", { class: "card" },
+    progressBar(),
+    h("h2", {}, "Before the explanation: what changed?"),
+    h("p", { class: "muted" }, cur.item.english),
+    spot.useFixed
+      ? [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, cur.answer),
+        h("h3", {}, "Corrected — tap what is different"), h("p", { class: "line-zh sm spot", lang: "zh-Hans" }, chars)]
+      : [h("h3", {}, "Your answer — tap what had to go"), h("p", { class: "line-zh sm spot", lang: "zh-Hans" }, chars),
+        h("h3", {}, "Corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, cur.grade.corrected)],
+    h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", onclick: () => finish(true) }, "Skip"),
+      check),
+    h("p", { class: "muted small" }, "You can turn this step off in Settings."));
+}
+
 function feedbackView() {
   const cur = P.current;
   if (cur.retry) return retryView(cur);
+  if (cur.spot && !cur.spot.done) return spotView(cur);
   const { item, answer, grade } = cur;
   const changed = grade.corrected && hanOnly(grade.corrected) !== hanOnly(answer);
   const [mine, fixed] = changed ? diffChars(answer, grade.corrected) : [null, null];
@@ -695,6 +787,8 @@ function feedbackView() {
       h("div", {}, h("div", { class: "verdict" }, grade.verdict), h("div", { class: "muted" }, item.english))),
     !grade.skipped && ratingChips(grade),
     cur.regraded && h("p", { class: "muted small", role: "status" }, cur.regraded),
+    cur.spot && !cur.spot.skipped && h("p", { class: "muted small", role: "status" },
+      `You found ${cur.spot.hit} of the ${cur.spot.targets} changed ${cur.spot.targets === 1 ? "character" : "characters"}`, cur.spot.extra ? `, and tapped ${cur.spot.extra} that did not change.` : "."),
 
     grade.issues.length ? [h("h3", {}, "What to fix"), issueList(grade.issues)] : null,
 
@@ -705,6 +799,8 @@ function feedbackView() {
 
     h("h3", {}, "Reference answer", item.hsk ? h("span", { class: "tag inline" }, item.hsk) : null),
     referenceBlock(item, cur),
+
+    canSpeak && h("p", { class: "muted small repeat-cue" }, "Listen, then say the sentence aloud without looking. Saying it helps it stick."),
 
     h("div", { class: "row retry-row" },
       h("button", { class: "btn", type: "button", onclick: () => { cur.retry = { text: "" }; render(); window.scrollTo(0, 0); document.getElementById("retry")?.focus(); } }, "Try again from memory"),
@@ -773,7 +869,9 @@ function applyRating(rating) {
   setLastRating(rating);
   if (rating === "recalled" || rating === "easy") easeWeak(cur.item.chinese, cur.grade.weak);
   const record = cur.item.reviewId ? state.reviews.find((r) => r.id === cur.item.reviewId) : null;
-  logAttempt(cur.item, cur.grade, rating, Boolean(record), record?.last ? (Date.now() - record.last) / 86400000 : 0);
+  // Was this sentence missed the last time it came up? (For the session summary.)
+  if (record && !cur.item.tries) cur.result.before = { missed: record.lr ? record.lr <= 2 : (record.lapses || 0) > 0 };
+  logAttempt(cur.item, cur.grade, rating, Boolean(record), record?.last ? (Date.now() - record.last) / 86400000 : 0, cur.result.hints || 0);
   const retry = scheduleReview(cur.item, rating);
   const tries = cur.item.tries || 0;
   if (retry && tries < 2) P.items.push({ ...cur.item, id: `${cur.item.id}-r${tries + 1}`, tries: tries + 1 });
@@ -787,7 +885,7 @@ function rate(rating) {
 // On the feedback screen, 1-4 rate the sentence and Return accepts the
 // suggested rating, unless the learner is typing somewhere.
 document.addEventListener("keydown", (e) => {
-  if (view !== "practice" || P.phase !== "feedback" || P.current?.retry || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (view !== "practice" || P.phase !== "feedback" || P.current?.retry || (P.current?.spot && !P.current.spot.done) || e.metaKey || e.ctrlKey || e.altKey) return;
   if (["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"].includes(document.activeElement?.tagName)) return;
   const r = RATINGS[Number(e.key) - 1];
   if (r) rate(r.id);
@@ -814,7 +912,7 @@ function endSession() {
     applyRating(P.current.suggested);
     P.items.length = items; // the session is ending, so no retry is queued
   }
-  P = P.results?.length ? { phase: "summary", results: P.results } : { phase: "setup" };
+  P = P.results?.length ? { phase: "summary", results: P.results, startedAt: P.startedAt } : { phase: "setup" };
   render();
   window.scrollTo(0, 0);
 }
@@ -827,6 +925,8 @@ function summaryView() {
   const last = new Map();
   results.forEach((r) => last.set(r.item.chinese, r));
   const missed = [...last.values()].filter((r) => r.rating === "forgot" || r.rating === "hard");
+  const started = P.startedAt || 0;
+  const { recovered, notes } = sessionNotes(results.filter((r) => r.rating), (state.log || []).filter((e) => e.t < started));
   const retryMissed = () => beginSession(missed.map((r, i) => ({ ...r.item, id: `${r.item.id}-m${i}`, tries: 0 })));
 
   return h("section", { class: "card" },
@@ -839,6 +939,11 @@ function summaryView() {
     h("div", { class: "row summary-actions" },
       missed.length ? h("button", { class: "btn primary grow", type: "button", onclick: retryMissed }, missed.length === 1 ? "Retry the 1 missed sentence" : `Retry the ${missed.length} missed sentences`) : null,
       h("button", { class: missed.length ? "btn" : "btn primary grow", type: "button", onclick: () => { P = { phase: "setup" }; render(); } }, "New session")),
+    notes.length ? [h("h3", {}, "What this session showed"),
+      h("ul", { class: "points shown" }, notes.map((n) => h("li", {}, h("b", n.hanzi ? { class: "hanzi", lang: "zh-Hans" } : {}, n.label), ": ", n.text)))] : null,
+    recovered.length ? [h("h3", {}, recovered.length === 1 ? "Missed last time, recalled now" : `Missed last time, recalled now (${recovered.length})`),
+      h("ul", { class: "points recovered" }, recovered.map((r) => h("li", {}, h("span", { class: "hanzi", lang: "zh-Hans" }, r.item.chinese), h("span", { class: "muted" }, ` ${r.item.english}`))))] : null,
+    weekGoal(),
     h("h3", {}, "Sentences"),
     results.map((r) => attemptRow({ ...r.grade, rating: r.rating, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, src: r.item.src, ref: r.item.ref, sentenceNote: r.item.note, answer: r.answer })));
 }
@@ -1234,6 +1339,20 @@ function settingsView() {
     h("div", { class: "field" }, h("label", { for: "hsk" }, "Level lists used for the new-character cap"), hskSelect,
       h("div", { class: "hint" }, hskLabel() ? `Current cap: ${hskLabel()}. Change the level on the Practice screen.` : "No cap is set. Change it on the Practice screen.")));
 
+  // --- Practice options
+  const seg = (key, options) => h("div", { class: "segmented", role: "group" },
+    options.map(([value, label]) => h("button", { type: "button", "aria-pressed": String(s[key] === value), onclick: () => set(key, value) }, label)));
+  const practiceCard = h("section", { class: "card" },
+    h("h2", {}, "Practice"),
+    h("div", { class: "field" },
+      h("div", { class: "label" }, "Weekly goal (practice days)"),
+      seg("weeklyGoal", [[0, "None"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"], [7, "7"]]),
+      h("div", { class: "hint" }, "The Practice screen shows how the week is going. Nothing is lost if a week falls short.")),
+    h("div", { class: "field" },
+      h("div", { class: "label" }, "Find the change before the explanation"),
+      seg("spotFirst", [[true, "On"], [false, "Off"]]),
+      h("div", { class: "hint" }, "When your answer needed a correction, you first tap what changed, then see why.")));
+
   // --- Backup
   const restore = filePicker("restore", "Choose backup file", async (f) => {
     try {
@@ -1284,7 +1403,7 @@ function settingsView() {
     h("p", { class: "small muted", id: "version" }, MODULE_VERSION === APP_VERSION
       ? `App version ${APP_VERSION}.`
       : `App version ${APP_VERSION}, but an older part (${MODULE_VERSION}) is still loaded. Reload the page.`));
-  return [accountCard(), apiCard, hanlyCard, hskCard, dataCard, dangerCard, about].filter(Boolean);
+  return [accountCard(), apiCard, practiceCard, hanlyCard, hskCard, dataCard, dangerCard, about].filter(Boolean);
 }
 
 function downloadBackup() {
