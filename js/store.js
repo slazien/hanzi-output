@@ -2,7 +2,7 @@
 // except the sentence text that goes to the Anthropic API.
 
 const KEY = "juzi.v1";
-const API_KEY = "juzi.apiKey";
+const API_KEYS = { anthropic: "juzi.apiKey", openai: "juzi.openaiKey" };
 const HISTORY_LIMIT = 500;
 
 export const DEFAULTS = {
@@ -54,24 +54,24 @@ export function save() {
   }
 }
 
-export function getApiKey() {
+export function getApiKey(provider = "anthropic") {
   try {
-    return localStorage.getItem(API_KEY) || "";
+    return localStorage.getItem(API_KEYS[provider]) || "";
   } catch {
     return "";
   }
 }
 
-export function setApiKey(value) {
+export function setApiKey(value, provider = "anthropic") {
   try {
-    if (value) localStorage.setItem(API_KEY, value);
-    else localStorage.removeItem(API_KEY);
+    if (value) localStorage.setItem(API_KEYS[provider], value);
+    else localStorage.removeItem(API_KEYS[provider]);
   } catch {
     /* storage unavailable */
   }
 }
 
-// Backup deliberately leaves the API key out.
+// Backup deliberately leaves the API keys out.
 export function exportData() {
   return JSON.stringify({ app: "juzi", version: 1, exportedAt: new Date().toISOString(), data: state }, null, 1);
 }
