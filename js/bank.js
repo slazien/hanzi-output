@@ -57,12 +57,13 @@ export function creditOf(item) {
 }
 
 // Rows that fit the learner's limits and the chosen theme and grammar.
-export function fitting({ known, allowedNew, maxNewPct, maxNewWordsPct, theme, grammarRe }) {
+export function fitting({ known, allowedNew, maxNewPct, maxNewWordsPct, theme, grammarRe, contains }) {
   if (!bank) return [];
   const re = grammarRe ? new RegExp(grammarRe) : null;
   const out = [];
   for (const row of bank.rows) {
     if (theme && row.theme !== theme) continue;
+    if (contains && !row.chinese.includes(contains)) continue;
     if (re && !re.test(row.chinese)) continue;
     let fresh = 0;
     let over = false;
@@ -86,6 +87,35 @@ export function fitting({ known, allowedNew, maxNewPct, maxNewWordsPct, theme, g
     out.push(row);
   }
   return out;
+}
+
+const toItem = (row) => ({
+  english: row.english,
+  chinese: row.chinese,
+  words: wordsOf(row),
+  theme: row.theme,
+  note: row.note || "",
+  src: row.src,
+  ref: row.ref,
+});
+
+// A different sentence that reuses words from `chinese`, for reviewing the
+// same material without repeating the sentence word for word. Returns null
+// when nothing among `rows` shares a word of two or more characters with it.
+export function variantOf(chinese, words, rows, avoid = new Set()) {
+  const keys = [...new Set((words || []).map((w) => w.text).filter((t) => hanChars(t).length >= 2))];
+  if (!keys.length) return null;
+  let best = null;
+  let bestShared = 0;
+  for (const row of rows) {
+    if (row.chinese === chinese || avoid.has(row.chinese)) continue;
+    const shared = keys.filter((k) => row.chinese.includes(k)).length;
+    if (shared > bestShared || (shared === bestShared && shared > 0 && Math.random() < 0.3)) {
+      best = row;
+      bestShared = shared;
+    }
+  }
+  return best ? toItem(best) : null;
 }
 
 function shuffle(list) {
@@ -127,13 +157,5 @@ export function pick(rows, { count, weak = [], avoid = new Set(), spreadThemes =
     }
   }
   for (const row of pool) take(row);
-  return shuffle(chosen).map((row) => ({
-    english: row.english,
-    chinese: row.chinese,
-    words: wordsOf(row),
-    theme: row.theme,
-    note: row.note || "",
-    src: row.src,
-    ref: row.ref,
-  }));
+  return shuffle(chosen).map(toItem);
 }

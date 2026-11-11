@@ -6,7 +6,9 @@ import { buildKnown, hskAllowed, measure, measureWords, sentenceHsk, hanChars } 
 import { generateSentences, ClaudeError } from "./claude.js";
 import { ALL_THEMES } from "../data/themes.js";
 import { GRAMMAR } from "../data/grammar.js";
-import { loadBank, bankReady, fitting, pick } from "./bank.js";
+import { loadBank, bankReady, fitting, pick, variantOf } from "./bank.js";
+import { focusFilter } from "./insight.js";
+import { review as fsrsReview, intervalFor, retrievability } from "./fsrs.js";
 
 export const PASS_SCORE = 80;
 const LEGACY_DAYS = [1, 3, 7, 14]; // gaps used by review records saved before self-rating
@@ -24,8 +26,18 @@ function shuffle(list) {
 }
 const squash = (s) => String(s || "").replace(/\s+/g, "");
 
+const DAILY_REVIEW_CAP = 40;
+
+// Sentences due for review, the ones most likely to be forgotten first.
 export function dueReviews(now = Date.now()) {
-  return state.reviews.filter((r) => r.due <= now).sort((a, b) => a.due - b.due);
+  return state.reviews.filter((r) => r.due <= now).sort((a, b) => recallNow(a, now) - recallNow(b, now));
+}
+
+// How many more reviews today's cap allows.
+export function reviewsLeftToday(now = Date.now()) {
+  const start = new Date(now).setHours(0, 0, 0, 0);
+  const done = (state.log || []).filter((e) => e.rv && e.t >= start).length;
+  return Math.max(0, DAILY_REVIEW_CAP - done);
 }
 
 export function hskLabel() {
@@ -61,50 +73,83 @@ export function countFitting() {
   }).length;
 }
 
-export async function buildSession(onProgress = () => {}) {
+// A sentence whose review gap has grown past this many days is sometimes
+// reviewed through a different sentence that reuses its words.
+const VARY_AFTER_DAYS = 21;
+const VARY_CHANCE = 0.5;
+
+// Builds a session. With `focus` (a weak area from insight.js), about 60% of
+// the new sentences target that area and the rest are ordinary ones.
+export async function buildSession(onProgress = () => {}, focus = null) {
   const s = state.settings;
   const known = buildKnown(state);
   if (!known.chars.size && s.maxNewPct < 100) {
     throw new ClaudeError("No known characters yet. Import your Hanly export in Settings, or set new characters to any.");
   }
   const length = s.sessionLength;
-  const reviews = dueReviews().slice(0, Math.ceil(length / 2));
+  const reviewShare = focus ? 0.2 : 0.5;
+  const reviews = dueReviews().slice(0, Math.min(Math.ceil(length * reviewShare), reviewsLeftToday()));
   const freshNeeded = length - reviews.length;
 
   let fresh;
   let notice = "";
+  let rows = [];
+  const base = { known, allowedNew: hskAllowed(s.hskScheme, s.hskCap), maxNewPct: s.maxNewPct, maxNewWordsPct: s.maxNewWordsPct };
+  const avoid = new Set([...state.history.slice(0, 300).map((h) => h.chinese), ...state.reviews.map((r) => r.chinese)]);
   if (AI_SENTENCES) {
     fresh = await buildWithAI(freshNeeded, known, reviews, onProgress);
   } else {
     onProgress("Choosing sentences…");
     await loadBank();
-    const rows = fitting({
-      known, allowedNew: hskAllowed(s.hskScheme, s.hskCap),
-      maxNewPct: s.maxNewPct, maxNewWordsPct: s.maxNewWordsPct, theme: s.theme, grammarRe: grammarRe(),
-    });
-    const avoid = new Set([...state.history.slice(0, 300).map((h) => h.chinese), ...state.reviews.map((r) => r.chinese)]);
-    fresh = pick(rows, { count: freshNeeded, weak: (state.weak || []).map((w) => w.text), avoid, spreadThemes: !s.theme })
-      .map((item) => ({ ...item, id: uid(), grammar: s.grammar, hsk: sentenceHsk(item.chinese, s.hskScheme) }));
-    if (fresh.length < freshNeeded) {
-      notice = fresh.length
-        ? `Only ${fresh.length} ${fresh.length === 1 ? "sentence fits" : "sentences fit"} these settings, so this session is shorter. Allow more new characters or words, or pick another theme, to get more.`
-        : "";
+    const weak = (state.weak || []).map((w) => w.text);
+    const decorate = (item) => ({ ...item, id: uid(), grammar: s.grammar, hsk: sentenceHsk(item.chinese, s.hskScheme) });
+    if (focus) {
+      const filter = focusFilter(focus);
+      // When the focus is a word, its own characters do not count against the
+      // new-material limits, or the word could never appear.
+      const focusKnown = focus.kind === "word"
+        ? { ...known, chars: new Set([...known.chars, ...hanChars(focus.key)]), wordSet: new Set([...known.wordSet, focus.key]) }
+        : known;
+      const focusRows = filter ? fitting({ ...base, known: focusKnown, ...filter }) : [];
+      rows = fitting(base);
+      const focused = pick(focusRows, { count: Math.min(freshNeeded, Math.ceil(length * 0.6)), weak, avoid }).map((i) => ({ ...decorate(i), grammar: focus.kind === "grammar" ? focus.key : "", focus: focus.label }));
+      const taken = new Set([...avoid, ...focused.map((i) => i.chinese)]);
+      const others = pick(rows, { count: freshNeeded - focused.length, weak, avoid: taken, spreadThemes: true }).map((i) => ({ ...decorate(i), grammar: "" }));
+      fresh = shuffle([...focused, ...others]);
+      if (!focused.length) notice = `No sentences in the bank target “${focus.label}” within your current limits, so this is an ordinary session.`;
+      else if (focused.length < Math.ceil(length * 0.6) && focused.length < freshNeeded) notice = `Only ${focused.length} ${focused.length === 1 ? "sentence targets" : "sentences target"} “${focus.label}” within your current limits; the rest are ordinary sentences.`;
+    } else {
+      rows = fitting({ ...base, theme: s.theme, grammarRe: grammarRe() });
+      fresh = pick(rows, { count: freshNeeded, weak, avoid, spreadThemes: !s.theme }).map(decorate);
+      if (fresh.length && fresh.length < freshNeeded) {
+        notice = `Only ${fresh.length} ${fresh.length === 1 ? "sentence fits" : "sentences fit"} these settings, so this session is shorter. Allow more new characters or words, or pick another theme, to get more.`;
+      }
     }
   }
 
-  const reviewItems = reviews.map((r) => ({
-    id: uid(),
-    reviewId: r.id,
-    english: r.english,
-    chinese: r.chinese,
-    words: r.words || null,
-    grammar: r.grammar || "",
-    theme: r.theme || "",
-    note: r.note || "",
-    src: r.src,
-    ref: r.ref,
-    hsk: sentenceHsk(r.chinese, s.hskScheme),
-  }));
+  const everything = bankReady() ? fitting(base) : [];
+  const reviewItems = reviews.map((r) => {
+    const item = {
+      id: uid(),
+      reviewId: r.id,
+      english: r.english,
+      chinese: r.chinese,
+      words: r.words || null,
+      grammar: r.grammar || "",
+      theme: r.theme || "",
+      note: r.note || "",
+      src: r.src,
+      ref: r.ref,
+      hsk: sentenceHsk(r.chinese, s.hskScheme),
+    };
+    // Well-established sentences are sometimes reviewed through a different
+    // sentence with the same words, so the wording is not learned by heart.
+    if (r.s >= VARY_AFTER_DAYS && Math.random() < VARY_CHANCE) {
+      const variant = variantOf(r.chinese, r.words, everything, avoid);
+      if (variant) return { ...item, ...variant, grammar: "", hsk: sentenceHsk(variant.chinese, s.hskScheme), variantOf: r.chinese };
+    }
+    return item;
+  });
 
   // Spread the review sentences through the session.
   const items = [];
@@ -187,9 +232,9 @@ async function buildWithAI(freshNeeded, known, reviews, onProgress) {
   return accepted;
 }
 
-// ---------- self-rated spaced review ----------
+// ---------- self-rated spaced review (FSRS) ----------
 // After each sentence the learner rates how it went. The rating, not the AI
-// score, decides when the sentence comes back.
+// score, decides when the sentence comes back; the timing comes from FSRS.
 
 export const RATINGS = [
   { id: "forgot", label: "Forgot" },
@@ -197,37 +242,49 @@ export const RATINGS = [
   { id: "recalled", label: "Recalled" },
   { id: "easy", label: "Easy" },
 ];
+const GRADE = { forgot: 1, hard: 2, recalled: 3, easy: 4 };
 const MINUTE = 1 / (24 * 60); // in days
-const RETIRE_AFTER_DAYS = 120; // a sentence this well known stops coming back
+const RELEARN_MINUTES = 10; // a forgotten sentence is due again this soon
 
 function reviewOf(item) {
   return item.reviewId ? state.reviews.find((r) => r.id === item.reviewId) : null;
 }
 
-// Current gap for a sentence in days (0 for one not yet in review).
-export function currentInterval(item) {
-  const r = reviewOf(item);
-  if (!r) return 0;
-  return r.interval ?? LEGACY_DAYS[r.step] ?? 1;
+// Memory state of a review record. Records saved before FSRS only have a gap
+// in days: that gap is taken as the stability, with a middling difficulty.
+function memoryOf(record) {
+  if (!record) return null;
+  if (record.s) return { s: record.s, d: record.d, last: record.last };
+  const gap = record.interval ?? LEGACY_DAYS[record.step] ?? 1;
+  return { s: Math.max(0.5, gap), d: 5, last: (record.due || Date.now()) - gap * DAY };
 }
 
-// The next gap in days for a rating: short retries for Forgot and Hard on new
-// sentences, then gaps that grow each time the sentence is recalled.
-export function nextInterval(prevDays, rating) {
-  if (rating === "forgot") return 10 * MINUTE;
-  if (rating === "hard") return prevDays < 1 ? 15 * MINUTE : prevDays * 1.2;
-  if (rating === "easy") return prevDays < 1 ? 2 : prevDays * 4;
-  return prevDays < 1 ? 1 : prevDays * 2.5;
+// Chance (0-1) that a sentence in review would be recalled right now.
+export function recallNow(record, now = Date.now()) {
+  const m = memoryOf(record);
+  return m ? retrievability((now - m.last) / DAY, m.s) : 1;
+}
+
+// What a rating would do: the new memory state and the gap until the next review, in days.
+function outcome(item, rating, now) {
+  const m = memoryOf(reviewOf(item));
+  const next = fsrsReview(m && { s: m.s, d: m.d }, GRADE[rating], m ? (now - m.last) / DAY : 0);
+  const gap = rating === "forgot" ? RELEARN_MINUTES * MINUTE : intervalFor(next.s);
+  return { ...next, gap };
+}
+
+// The gap shown on each rating button.
+export function previewInterval(item, rating, now = Date.now()) {
+  return outcome(item, rating, now).gap;
 }
 
 export function intervalText(days) {
   if (days < 1 / 24) return `${Math.round(days / MINUTE)} minutes`;
   if (days < 1) return `${Math.round(days * 24)} hours`;
-  if (days > RETIRE_AFTER_DAYS) return "done";
   const d = Math.round(days);
   if (d < 31) return d === 1 ? "1 day" : `${d} days`;
-  const months = Math.round(d / 30);
-  return months === 1 ? "1 month" : `${months} months`;
+  if (d < 365) { const months = Math.round(d / 30); return months === 1 ? "1 month" : `${months} months`; }
+  return "1 year";
 }
 
 // What the AI's score would suggest; the learner can overrule it.
@@ -237,17 +294,14 @@ export function suggestRating(grade) {
   return grade.score >= 95 ? "easy" : "recalled";
 }
 
-// Applies a rating. Returns true when the sentence should be retried soon
-// (its new gap is under a day).
+// Applies a rating. Returns true when the sentence should be retried in this
+// session (Forgot, or Hard on a sentence seen for the first time).
 export function scheduleReview(item, rating, now = Date.now()) {
-  const interval = nextInterval(currentInterval(item), rating);
   let record = reviewOf(item);
-  if (interval > RETIRE_AFTER_DAYS) {
-    if (record) state.reviews = state.reviews.filter((r) => r !== record);
-    save();
-    return false;
-  }
+  const first = !record;
+  const next = outcome(item, rating, now);
   if (!record) {
+    // A variation shown in place of a review keeps updating the original record.
     record = {
       id: uid(),
       english: item.english,
@@ -258,15 +312,43 @@ export function scheduleReview(item, rating, now = Date.now()) {
       note: item.note || "",
       src: item.src,
       ref: item.ref,
+      reps: 0,
+      lapses: 0,
     };
     state.reviews.push(record);
     item.reviewId = record.id;
   }
   delete record.step;
-  record.interval = interval;
-  record.due = now + interval * DAY;
+  delete record.interval;
+  record.s = next.s;
+  record.d = next.d;
+  record.last = now;
+  record.due = now + next.gap * DAY;
+  record.reps = (record.reps || 0) + 1;
+  if (rating === "forgot") record.lapses = (record.lapses || 0) + 1;
   save();
-  return interval < 1;
+  return rating === "forgot" || (rating === "hard" && first);
+}
+
+// ---------- attempt log ----------
+// A compact line per rated attempt, kept much longer than the detailed
+// history, for the Progress screen and for finding weak areas.
+const LOG_LIMIT = 6000;
+
+export function logAttempt(item, grade, rating, wasReview, gapBefore, now = Date.now()) {
+  const hsk = Number(String(item.hsk || "").replace(/\D+/g, "").slice(0, 1)) || 0;
+  const entry = { t: now, sc: grade.skipped ? null : grade.score, r: GRADE[rating] };
+  if (item.theme) entry.th = item.theme;
+  if (hsk) entry.h = hsk;
+  if (item.grammar) entry.g = item.grammar;
+  const cats = [...new Set((grade.issues || []).map((i) => i.category).filter(Boolean))];
+  if (cats.length) entry.c = cats;
+  if (grade.weak?.length) entry.w = grade.weak;
+  if (wasReview) { entry.rv = 1; entry.iv = Math.round(gapBefore * 10) / 10; }
+  state.log = state.log || [];
+  state.log.push(entry);
+  if (state.log.length > LOG_LIMIT) state.log.splice(0, state.log.length - LOG_LIMIT);
+  save();
 }
 
 // Words and patterns the learner got wrong are remembered so that new

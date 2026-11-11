@@ -5,6 +5,7 @@
 import Anthropic from "../vendor/anthropic-sdk.js";
 import { getApiKey, cleanApiKey } from "./store.js";
 import { askOpenAI, OPENAI_MODULE_VERSION } from "./openai.js";
+import { CATEGORIES } from "./insight.js";
 
 export const MODULE_VERSION = OPENAI_MODULE_VERSION ?? 0;
 
@@ -126,7 +127,7 @@ const GRADE_SCHEMA = obj({
   verdict: str,
   corrected: str,
   strengths: { type: "array", items: str },
-  issues: { type: "array", items: obj({ quote: str, problem: str, fix: str }) },
+  issues: { type: "array", items: obj({ quote: str, problem: str, fix: str, category: { type: "string", enum: Object.keys(CATEGORIES) } }) },
   weak_points: { type: "array", items: str },
   note: str,
 });
@@ -207,7 +208,9 @@ Return:
 - "verdict": three to six words summarising the result.
 - "corrected": the learner's own sentence with the smallest changes that make it correct. If it is already correct, repeat it unchanged.
 - "strengths": zero to three short points about what the learner got right, naming the words or structure.
-- "issues": each real mistake, with "quote" (the wrong part of their answer, or "" if something is missing), "problem" (why it is wrong, in plain English) and "fix" (the corrected Chinese). Empty when there are no mistakes.
+- "issues": each real mistake (at most three, the most important first), with "quote" (the wrong part of their answer, or "" if something is missing), "problem" (why it is wrong, in plain English), "fix" (the corrected Chinese) and "category", the one label that best describes the mistake:
+  word_choice (a wrong or unnatural word), measure_word, aspect (了 / 过 / 着), word_order, ba_bei (把 or 被 constructions), complement (result, direction, degree or potential complements), particle (的 / 地 / 得 / 吗 / 呢 / 吧), preposition (在 / 给 / 对 / 跟 / 从 and similar), negation (不 / 没 and adverb placement), connector (linking clauses: 因为, 但是, 如果 ...), missing_word, extra_word, character (a wrong or mistyped character), other.
+  Do not list a valid alternative wording as an issue. Empty when there are no mistakes.
 - "weak_points": up to three Chinese words or grammar patterns, written in Chinese characters only (for example 相机 or 把), that the learner got wrong or clearly did not know in this answer. Empty when the answer was correct.
 - "note": one or two sentences of the most useful advice for next time, or "" if there is nothing to add.
 
@@ -235,7 +238,7 @@ export async function gradeAnswer({ model, english, reference, answer, grammar }
     verdict: String(result.verdict || ""),
     corrected: String(result.corrected || ""),
     strengths: (result.strengths || []).map(String).filter(Boolean),
-    issues: (result.issues || []).filter((i) => i && (i.problem || i.fix)),
+    issues: (result.issues || []).filter((i) => i && (i.problem || i.fix)).slice(0, 3),
     weak: (result.weak_points || []).map((w) => String(w).replace(/[^\u4e00-\u9fff]/g, "")).filter(Boolean).slice(0, 3),
     note: String(result.note || ""),
   };
