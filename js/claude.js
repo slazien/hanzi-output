@@ -120,6 +120,7 @@ const GRADE_SCHEMA = obj({
   corrected: str,
   strengths: { type: "array", items: str },
   issues: { type: "array", items: obj({ quote: str, problem: str, fix: str }) },
+  weak_points: { type: "array", items: str },
   note: str,
 });
 
@@ -134,7 +135,7 @@ For each exercise give:
 
 The learner's known characters and words are hard constraints, described in each request. Count characters and words in your Chinese sentence before you answer, and rewrite any sentence that breaks the limit. Sentences must still be correct, natural Chinese that a native speaker would say; prefer a simpler idea over an awkward sentence. Vary the subjects, situations and sentence types across the set.`;
 
-export async function generateSentences({ model, count, known, knownWords, maxNewPct, maxNewWordsPct, hskLabel, grammar, theme, themes, avoid, feedback }) {
+export async function generateSentences({ model, count, known, knownWords, maxNewPct, maxNewWordsPct, hskLabel, grammar, theme, themes, focus, avoid, feedback }) {
   const lines = [
     `Write ${count} exercises.`,
     "",
@@ -171,6 +172,9 @@ export async function generateSentences({ model, count, known, knownWords, maxNe
   } else if (themes?.length) {
     lines.push(`Themes: give each sentence a different theme, in this order where the vocabulary allows: ${themes.join("; ")}.`);
   }
+  if (focus?.length) {
+    lines.push(`The learner recently got these wrong: ${focus.join(" ")}. Use several of them again, each in a new sentence and a different context, wherever they fit naturally and the limits above allow.`);
+  }
   if (avoid?.length) {
     lines.push("", "Do not repeat or closely paraphrase these recent sentences:", ...avoid.map((s) => `- ${s}`));
   }
@@ -197,6 +201,7 @@ Return:
 - "corrected": the learner's own sentence with the smallest changes that make it correct. If it is already correct, repeat it unchanged.
 - "strengths": zero to three short points about what the learner got right, naming the words or structure.
 - "issues": each real mistake, with "quote" (the wrong part of their answer, or "" if something is missing), "problem" (why it is wrong, in plain English) and "fix" (the corrected Chinese). Empty when there are no mistakes.
+- "weak_points": up to three Chinese words or grammar patterns, written in Chinese characters only (for example 相机 or 把), that the learner got wrong or clearly did not know in this answer. Empty when the answer was correct.
 - "note": one or two sentences of the most useful advice for next time, or "" if there is nothing to add.
 
 Write explanations in English. Be accurate and direct; do not praise wrong answers.`;
@@ -224,6 +229,7 @@ export async function gradeAnswer({ model, english, reference, answer, grammar }
     corrected: String(result.corrected || ""),
     strengths: (result.strengths || []).map(String).filter(Boolean),
     issues: (result.issues || []).filter((i) => i && (i.problem || i.fix)),
+    weak: (result.weak_points || []).map((w) => String(w).replace(/[^\u4e00-\u9fff]/g, "")).filter(Boolean).slice(0, 3),
     note: String(result.note || ""),
   };
 }
