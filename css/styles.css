@@ -7,6 +7,7 @@
   --accent: #b3261e;
   --accent-ink: #fffaf2;
   --accent-soft: #f6e3de;
+  --known: #5f7fae;
   --good: #2f6b4f;
   --good-soft: #e1eee6;
   --warn: #8a5a0b;
@@ -28,6 +29,7 @@
     --accent: #e4695d;
     --accent-ink: #1a1714;
     --accent-soft: #40241f;
+    --known: #7f9fd0;
     --good: #7fc4a0;
     --good-soft: #1f3329;
     --warn: #e0b45c;
@@ -251,14 +253,20 @@ input[type="file"] { max-width: 100%; }
 .line-zh { font: 1.65rem/1.6 var(--hanzi); margin: 0; word-break: break-all; }
 .line-zh.sm { font-size: 1.3rem; }
 
-.words { display: flex; flex-wrap: wrap; font: 1.75rem/1.5 var(--hanzi); }
+.words { display: flex; flex-wrap: wrap; align-items: flex-end; row-gap: 6px; font: 1.75rem/1.35 var(--hanzi); }
 .word {
-  border: 0; background: none; padding: 2px 3px; margin: 0; border-radius: 8px;
+  display: inline-flex; flex-direction: column; align-items: center;
+  border: 0; background: none; padding: 4px 5px; margin: 0; border-radius: 8px;
   font: inherit; color: inherit; cursor: pointer; min-height: 44px;
 }
-.word.punct { cursor: default; padding: 2px 0; }
+.word.punct { cursor: default; padding: 4px 0; }
 .word[aria-pressed="true"] { background: var(--paper); box-shadow: inset 0 0 0 1px var(--line); }
-.new-char { text-decoration: underline dotted var(--accent) 2px; text-underline-offset: 7px; }
+.word .py-top { font: 0.8rem/1.3 var(--ui); color: var(--muted); white-space: nowrap; }
+.word .zh { border-bottom: 2px solid transparent; padding-bottom: 1px; }
+.word.known .zh { border-bottom-color: var(--known); }
+.ref-foot { margin-top: 8px; }
+.ref-note { font-style: italic; color: var(--muted); margin: 10px 0 0; }
+.tag.inline { margin-left: 8px; text-transform: none; letter-spacing: 0; vertical-align: 1px; }
 
 .gloss {
   margin-top: 10px; padding: 12px 14px; border-radius: 12px;

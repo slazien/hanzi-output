@@ -38,9 +38,10 @@ export function parseHanly(text) {
 export function knownFromHanly(entries, rule, cutoff) {
   const chars = new Set();
   const words = [];
+  const wordSet = new Set(); // every passing item, single characters included
   let items = 0;
   let components = 0;
-  if (!entries) return { chars, words, items, components };
+  if (!entries) return { chars, words, wordSet, items, components };
 
   for (const key of Object.keys(entries)) {
     if (key.endsWith(REVERSE)) continue;
@@ -61,9 +62,10 @@ export function knownFromHanly(entries, rule, cutoff) {
     else pass = hasReverse && reverse >= cutoff;
     if (!pass) continue;
     han.forEach((c) => chars.add(c));
+    wordSet.add(han.join(""));
     if (han.length > 1) words.push(han.join(""));
   }
-  return { chars, words, items, components };
+  return { chars, words, wordSet, items, components };
 }
 
 export function buildKnown(state) {
@@ -77,7 +79,15 @@ export function buildKnown(state) {
       added++;
     }
   }
-  return { chars, words: fromHanly.words, hanlyCount: fromHanly.chars.size, added, items: fromHanly.items, components: fromHanly.components };
+  const wordSet = new Set(fromHanly.wordSet);
+  const words = [...fromHanly.words];
+  for (const w of state.extraWords || []) {
+    if (!wordSet.has(w)) {
+      wordSet.add(w);
+      if ([...w].length > 1) words.push(w);
+    }
+  }
+  return { chars, words, wordSet, hanlyCount: fromHanly.chars.size, added, items: fromHanly.items, components: fromHanly.components };
 }
 
 // Characters allowed as "new" under the HSK cap (0 = no cap).
@@ -107,4 +117,37 @@ export function measure(chinese, known, allowedNew) {
     distinctNew,
     overCap,
   };
+}
+
+// A word counts as known when it was studied (a passing Hanly item or one
+// marked in this app) or when it is a single known character.
+export function isKnownWord(text, known) {
+  const han = hanChars(text).join("");
+  if (!han) return true;
+  return known.wordSet.has(han) || (han.length === 1 && known.chars.has(han));
+}
+
+// Share of new words = words not known / all words in the sentence
+// (punctuation ignored), using the word breakdown that came with the sentence.
+export function measureWords(words, known) {
+  const real = (words || []).filter((w) => hanChars(w.text).length);
+  const fresh = real.filter((w) => !isKnownWord(w.text, known));
+  return {
+    total: real.length,
+    newCount: fresh.length,
+    pct: real.length ? (fresh.length / real.length) * 100 : 0,
+    newWords: [...new Set(fresh.map((w) => w.text))],
+  };
+}
+
+// The hardest HSK level among a sentence's characters, as a label.
+export function sentenceHsk(chinese, scheme) {
+  let max = 0;
+  for (const c of new Set(hanChars(chinese))) {
+    const level = hskLevelOf(c, scheme);
+    if (level == null) return "Beyond HSK";
+    if (level > max) max = level;
+  }
+  if (!max) return "";
+  return max === 7 ? "HSK 7-9" : `HSK ${max}`;
 }

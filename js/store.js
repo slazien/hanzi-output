@@ -11,6 +11,8 @@ export const DEFAULTS = {
     knownRule: "reverse", // reverse | normal | both | any
     cutoff: 0.5, // Hanly progressPercent needed to count as known
     maxNewPct: 20, // maximum share of new characters in a sentence
+    maxNewWordsPct: 50, // maximum share of new words in a sentence
+    showPinyin: true, // pinyin printed above the reference answer
     hskScheme: "new", // new = HSK 3.0, old = HSK 2.0
     hskCap: 2, // 1-6, or 0 for no cap
     sessionLength: 10,
@@ -19,6 +21,7 @@ export const DEFAULTS = {
   onboarded: false, // first-run setup finished or skipped
   hanly: null, // { importedAt, fileName, entries: { key: progressPercent } }
   extraKnown: "", // characters the user marked as known in this app
+  extraWords: [], // words the user marked as known in this app
   reviews: [], // low-scoring sentences scheduled to come back
   history: [], // newest first
 };

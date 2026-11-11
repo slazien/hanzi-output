@@ -95,6 +95,7 @@ const SENTENCES_SCHEMA = obj({
       english: str,
       chinese: str,
       words: { type: "array", items: obj({ text: str, pinyin: str, gloss: str }) },
+      note: str,
     }),
   },
 });
@@ -114,10 +115,11 @@ For each exercise give:
 - "english": a natural English sentence for the learner to translate.
 - "chinese": the most natural simplified Chinese translation, with normal Chinese punctuation.
 - "words": the Chinese sentence split into words in order, each with tone-marked pinyin and a short English gloss that fits this sentence. Give punctuation its own entry with empty pinyin and gloss. Joined together, the "text" values must reproduce "chinese" exactly.
+- "note": one short sentence for the learner pointing out the key grammar point, word order or word choice in the Chinese sentence. Use "" when there is nothing worth pointing out.
 
-The learner's known characters are a hard constraint, described in each request. Count characters in your Chinese sentence before you answer, and rewrite any sentence that breaks the limit. Sentences must still be correct, natural Chinese that a native speaker would say; prefer a simpler idea over an awkward sentence. Vary the subjects, situations and sentence types across the set.`;
+The learner's known characters and words are hard constraints, described in each request. Count characters and words in your Chinese sentence before you answer, and rewrite any sentence that breaks the limit. Sentences must still be correct, natural Chinese that a native speaker would say; prefer a simpler idea over an awkward sentence. Vary the subjects, situations and sentence types across the set.`;
 
-export async function generateSentences({ model, count, known, knownWords, maxNewPct, hskLabel, grammar, avoid, feedback }) {
+export async function generateSentences({ model, count, known, knownWords, maxNewPct, maxNewWordsPct, hskLabel, grammar, avoid, feedback }) {
   const lines = [
     `Write ${count} exercises.`,
     "",
@@ -134,6 +136,13 @@ export async function generateSentences({ model, count, known, knownWords, maxNe
       `In each sentence, at most ${maxNewPct}% of the Chinese characters (counting every occurrence, ignoring punctuation) may be outside the known list. Fewer is fine. Choose new characters that are common and worth learning.`
     );
   }
+  if (maxNewWordsPct < 100) {
+    lines.push(
+      maxNewWordsPct <= 0
+        ? "Every word in each sentence must be a known word: one from the studied words list, or a single known character."
+        : `In each sentence, at most ${maxNewWordsPct}% of the words (as you split them in "words", ignoring punctuation) may be new. A word is known if it is in the studied words list or is a single known character; any other word is new, even when all its characters are known.`
+    );
+  }
   if (hskLabel && maxNewPct > 0) {
     lines.push(`Any character outside the known list must belong to ${hskLabel}. Keep the grammar within that level too.`);
   }
@@ -146,7 +155,7 @@ export async function generateSentences({ model, count, known, knownWords, maxNe
     lines.push("", "Do not repeat or closely paraphrase these recent sentences:", ...avoid.map((s) => `- ${s}`));
   }
   if (feedback?.length) {
-    lines.push("", "Your previous attempt included sentences that broke the character limit. Avoid these problems:", ...feedback.map((s) => `- ${s}`));
+    lines.push("", "Your previous attempt included sentences that broke the limits. Avoid these problems:", ...feedback.map((s) => `- ${s}`));
   }
   const result = await ask({
     model,

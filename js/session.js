@@ -2,7 +2,7 @@
 // keeps the spaced-review schedule.
 
 import { state, save } from "./store.js";
-import { buildKnown, hskAllowed, measure, hanChars } from "./known.js";
+import { buildKnown, hskAllowed, measure, measureWords, sentenceHsk, hanChars } from "./known.js";
 import { generateSentences, ClaudeError } from "./claude.js";
 
 export const PASS_SCORE = 80;
@@ -59,6 +59,7 @@ export async function buildSession(onProgress = () => {}) {
       known: [...known.chars].join(""),
       knownWords: known.words,
       maxNewPct: s.maxNewPct,
+      maxNewWordsPct: s.maxNewWordsPct,
       hskLabel: hskLabel(),
       grammar: s.grammar,
       avoid: [...avoid, ...accepted.map((a) => a.english)],
@@ -71,15 +72,25 @@ export async function buildSession(onProgress = () => {}) {
       if (seen.has(key)) continue;
       seen.add(key);
       const m = measure(c.chinese, known.chars, allowedNew);
-      const item = { id: uid(), english: c.english.trim(), chinese: c.chinese.trim(), words: cleanWords(c), grammar: s.grammar, pct: m.pct };
+      const words = cleanWords(c);
+      const item = {
+        id: uid(), english: c.english.trim(), chinese: c.chinese.trim(), words, grammar: s.grammar,
+        note: String(c.note || "").trim(), hsk: sentenceHsk(c.chinese, s.hskScheme),
+      };
       const overPct = m.pct > s.maxNewPct + 0.01;
-      if (!overPct && !m.overCap.length) {
+      // The word limit can only be checked when the word breakdown is usable.
+      const limitWords = s.maxNewWordsPct < 100;
+      const mw = words ? measureWords(words, known) : null;
+      const overWords = limitWords && (!mw || mw.pct > s.maxNewWordsPct + 0.01);
+      if (!overPct && !overWords && !m.overCap.length) {
         if (accepted.length < freshNeeded) accepted.push(item);
         continue;
       }
-      rejected.push({ item, excess: Math.max(0, m.pct - s.maxNewPct) + m.overCap.length * 100 });
+      rejected.push({ item, excess: Math.max(0, m.pct - s.maxNewPct) + (mw ? Math.max(0, mw.pct - s.maxNewWordsPct) : limitWords ? 50 : 0) + m.overCap.length * 100 });
       const reasons = [];
       if (overPct) reasons.push(`${Math.round(m.pct)}% of its characters are outside the known list (${m.distinctNew.join(" ")}); the limit is ${s.maxNewPct}%`);
+      if (overWords && mw) reasons.push(`${Math.round(mw.pct)}% of its words are new (${mw.newWords.join(" ")}); the limit is ${s.maxNewWordsPct}%`);
+      if (overWords && !mw) reasons.push('its "words" list did not reproduce the sentence exactly');
       if (m.overCap.length) reasons.push(`${m.overCap.join(" ")} ${m.overCap.length > 1 ? "are" : "is"} above ${hskLabel()}`);
       feedback.push(`${c.chinese} — ${reasons.join("; ")}`);
     }
@@ -102,7 +113,8 @@ export async function buildSession(onProgress = () => {}) {
     chinese: r.chinese,
     words: r.words || null,
     grammar: r.grammar || "",
-    pct: measure(r.chinese, known.chars, null).pct,
+    note: r.note || "",
+    hsk: sentenceHsk(r.chinese, s.hskScheme),
   }));
 
   // Spread the review sentences through the session.
@@ -145,6 +157,7 @@ export function scheduleReview(item, score, now = Date.now()) {
       chinese: item.chinese,
       words: item.words,
       grammar: item.grammar,
+      note: item.note || "",
       step: 0,
       due: now + REVIEW_DAYS[0] * DAY,
     });
@@ -160,6 +173,9 @@ export function recordAttempt(item, answer, grade) {
     at: Date.now(),
     english: item.english,
     chinese: item.chinese,
+    words: item.words || null,
+    sentenceNote: item.note || "",
+    hsk: item.hsk || "",
     grammar: item.grammar || "",
     answer,
     review: Boolean(item.reviewId),
