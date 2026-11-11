@@ -67,8 +67,71 @@ function practiceView() {
     case "summary":
       return summaryView();
     default:
-      return setupView();
+      return state.onboarded ? setupView() : onboardingView();
   }
+}
+
+// First-run setup: the same settings as the Settings screen, in one place.
+function onboardingView() {
+  const s = state.settings;
+  const finish = () => { state.onboarded = true; flash = null; save(); render(); window.scrollTo(0, 0); };
+
+  const file = h("input", { type: "file", id: "ob-hanly", accept: ".json,application/json", onchange: async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try {
+      state.hanly = { importedAt: Date.now(), fileName: f.name, entries: parseHanly(await f.text()) };
+      save();
+      note("ob-hanly", "ok", `Imported. ${buildKnown(state).hanlyCount} characters count as known.`);
+    } catch (error) {
+      note("ob-hanly", "error", error.message);
+    }
+  } });
+
+  const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: getApiKey() ? "A key is saved on this device" : "sk-ant-…",
+    // Updated in place (no re-render, no layout shift) so a tap on another control right after typing is not lost.
+    onchange: (e) => { const v = e.target.value.trim(); if (v) { setApiKey(v); keyStatus.textContent = "Key saved on this device."; } } });
+  const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey() ? "Key saved on this device." : "No key saved yet.");
+
+  const pctLabel = h("span", {}, newPctText(s.maxNewPct));
+  const levels = [1, 2, 3, 4, 5, 6];
+
+  return [
+    h("section", { class: "card" },
+      h("h1", {}, "Set up your practice"),
+      h("p", { class: "lede" }, "Four quick choices so sentences match what you already know. Everything here can be changed later in Settings.")),
+
+    h("section", { class: "card" },
+      h("h2", {}, "1. Bring in your Hanly progress"),
+      h("p", { class: "muted small" }, "Choose the learning progress export (.json) from Hanly. Characters you have learned there become the characters sentences are built from. The file stays on this device."),
+      flashFor("ob-hanly"),
+      state.hanly && !flashFor("ob-hanly") ? h("div", { class: "notice ok" }, `${state.hanly.fileName} is imported. ${known.hanlyCount} characters count as known.`) : null,
+      file),
+
+    h("section", { class: "card" },
+      h("h2", {}, "2. Add your Anthropic API key"),
+      h("p", { class: "muted small" }, "Claude writes the sentences and grades your answers using your own key. It is stored only in this browser and sent only to Anthropic."),
+      h("div", { class: "field" }, keyInput, keyStatus)),
+
+    h("section", { class: "card" },
+      h("h2", {}, "3. Which HSK level are you studying?"),
+      h("p", { class: "muted small" }, "New characters and grammar in your sentences will come from this level and below."),
+      h("div", { class: "segmented", role: "group" },
+        levels.map((n) => h("button", { type: "button", "aria-pressed": String(s.hskCap === n), onclick: () => { s.hskCap = n; save(); render(); } }, `HSK ${n}`)))),
+
+    h("section", { class: "card" },
+      h("h2", {}, "4. How many new characters per sentence?"),
+      h("div", { class: "field" },
+        h("label", { for: "ob-maxnew" }, "New characters: ", pctLabel),
+        h("input", { type: "range", id: "ob-maxnew", min: "0", max: "100", step: "5", value: String(s.maxNewPct),
+          oninput: (e) => { pctLabel.textContent = newPctText(Number(e.target.value)); },
+          onchange: (e) => { s.maxNewPct = Number(e.target.value); save(); } }),
+        h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know."))),
+
+    h("div", { class: "row between" },
+      h("button", { class: "btn quiet", type: "button", onclick: finish }, "Skip for now"),
+      h("button", { class: "btn primary", type: "button", onclick: finish }, "Start practising")),
+  ];
 }
 
 function setupView() {
@@ -517,6 +580,7 @@ function settingsView() {
     h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: downloadBackup }, "Download backup")),
     h("div", { class: "field" }, h("label", { for: "restore" }, "Restore from a backup"), restore,
       h("div", { class: "hint" }, "Replaces everything in the app on this device except the API key.")),
+    h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: () => { state.onboarded = false; save(); P = { phase: "setup" }; go("practice"); } }, "Run first-time setup again")),
     h("div", { class: "row" },
       h("button", { class: "btn danger", type: "button", onclick: () => {
         if (!confirm("Delete all practice history from this device?")) return;

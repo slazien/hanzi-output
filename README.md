@@ -6,6 +6,7 @@ It is a static web app with no server. It can be installed on an iPad from Safar
 
 ## How it works
 
+- **First-run setup** – on first open, import the Hanly file, add the API key, pick the HSK level you are studying and set the new-character limit. It can be run again from Settings.
 - **Practice** – choose the number of sentences, the largest share of new characters allowed per sentence (0–100%), an HSK cap for new characters and grammar, and optionally a grammar pattern. Claude writes the sentences; the app checks each one against your known characters and asks for replacements when a sentence breaks the limit.
 - **Feedback** – a score out of 100, your answer corrected, a reference answer (tap a word for pinyin and meaning), what to fix, and a follow-up question box.
 - **Review** – sentences scored below 80 come back after 1, 3, 7 and 14 days, mixed into later sessions.
