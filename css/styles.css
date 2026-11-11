@@ -276,7 +276,10 @@ details > summary { cursor: pointer; }
 
 /* ---------- session setup ---------- */
 
+.fit-line { margin: -6px 0 16px; }
+.fit-line.warn { color: var(--warn); }
 .focus-line { margin-bottom: 18px; }
+a { color: inherit; }
 .focus-line .hanzi { font-size: 1.15rem; color: var(--ink); }
 
 .adjust { border-top: 1px solid var(--line); padding-top: 4px; }

@@ -1,8 +1,9 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
-import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
+import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
+import { loadBank, bankReady, creditOf } from "./bank.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 const main = document.getElementById("main");
@@ -91,7 +92,7 @@ function render() {
 function practiceView() {
   switch (P.phase) {
     case "loading":
-      return h("section", { class: "card" }, h("div", { class: "loading", role: "status" }, h("div", { class: "brush" }), h("div", {}, P.message || "Writing sentences…")));
+      return h("section", { class: "card" }, h("div", { class: "loading", role: "status" }, h("div", { class: "brush" }), h("div", {}, P.message || "Choosing sentences…")));
     case "answer":
     case "grading":
       return answerView();
@@ -142,7 +143,7 @@ function onboardingView() {
 
     h("section", { class: "card" },
       h("h2", {}, "2. Choose a model and add your API key"),
-      h("p", { class: "muted small" }, "An AI model writes the sentences and grades your answers, using your own Anthropic or OpenAI key. The key is stored only in this browser and sent only to that provider."),
+      h("p", { class: "muted small" }, "Sentences come from a stored bank. An AI model grades your answers and answers follow-up questions, using your own OpenAI or Anthropic key. The key is stored only in this browser and sent only to that provider."),
       h("div", { class: "field" }, modelPicker("ob-model", (e) => { s.model = e.target.value; save(); render(); })),
       h("label", { for: "ob-key" }, `${providerName()} API key`),
       h("div", { class: "field" }, keyInput, keyStatus)),
@@ -223,6 +224,12 @@ function setupView() {
     h("div", { class: "segmented", role: "group" },
       options.map(([value, label]) => h("button", { type: "button", "aria-pressed": String(s[key] === value), onclick: () => set(key, value) }, label)));
 
+  // How many stored sentences fit the settings (shown once the bank has loaded).
+  const fit = countFitting();
+  const fitText = fit == null ? "Loading the sentence bank…"
+    : fit === 0 ? "No sentences in the bank fit these settings. Allow more new characters or words, or change the theme or grammar."
+      : `${fit.toLocaleString()} ${fit === 1 ? "sentence fits" : "sentences fit"} these settings.`;
+
   const weak = state.weak || [];
   const summary = [
     `${newPctText(s.maxNewPct)} new characters`,
@@ -234,10 +241,11 @@ function setupView() {
   return h("section", { class: "card" },
     h("h1", {}, "Sentence practice"),
     h("p", { class: "lede" }, `${due} due for review · ${known.chars.size} characters known`),
-    !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key to generate and grade sentences. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
+    !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key so your answers can be graded. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     !state.hanly && h("div", { class: "notice" }, "No Hanly progress imported yet, so the app does not know which characters you know. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Import it in Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
-    h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()), onclick: startSession }, `Start · ${s.sessionLength} sentences`),
+    h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()) || fit === 0, onclick: startSession }, `Start · ${s.sessionLength} sentences`),
+    h("p", { class: `small fit-line ${fit === 0 ? "warn" : "muted"}`, role: "status" }, fitText),
     weak.length ? h("p", { class: "muted small focus-line" }, "Coming back in new sentences: ", h("span", { class: "hanzi", lang: "zh-Hans" }, weak.slice(0, 8).map((w) => w.text).join(" ")), " ",
       h("button", { class: "linkish", type: "button", onclick: () => { state.weak = []; save(); render(); } }, "Clear")) : null,
     h("div", { class: "field" },
@@ -267,22 +275,22 @@ function setupView() {
 const newPctText = (pct) => (pct === 0 ? "no" : pct >= 100 ? "any" : `up to ${pct}%`);
 
 async function startSession() {
-  P = { phase: "loading", message: "Writing sentences…" };
+  P = { phase: "loading", message: "Choosing sentences…" };
   render();
   try {
-    const items = await buildSession((message) => {
+    const { items, notice } = await buildSession((message) => {
       P.message = message;
       if (view === "practice" && P.phase === "loading") render();
     });
-    beginSession(items);
+    beginSession(items, notice);
   } catch (error) {
     P = { phase: "setup", error: error.message };
     render();
   }
 }
 
-function beginSession(items) {
-  P = { phase: "answer", items, index: 0, results: [], draft: "", hintLevel: 0, newShown: false };
+function beginSession(items, notice = "") {
+  P = { phase: "answer", items, index: 0, results: [], draft: "", hintLevel: 0, newShown: false, notice };
   render();
   window.scrollTo(0, 0);
   focusAnswer();
@@ -366,6 +374,7 @@ function answerView() {
     itemTags(item),
     h("p", { class: "prompt" }, item.english),
     newWords,
+    P.notice && P.index === 0 && h("div", { class: "notice" }, P.notice),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
     h("div", { class: "field" }, input, hintText && h("div", { class: "hintline", role: "status" }, hintText)),
     h("div", { class: "row" },
@@ -504,9 +513,16 @@ function referenceBlock(item, cur) {
     h("div", { class: "words", lang: "zh-Hans" }, buttons),
     panel,
     h("div", { class: "row between ref-foot" },
-      h("span", { class: "muted small" }, "Solid underline: words you know. Dotted: new words."),
+      h("span", { class: "muted small" }, "Solid underline: words you know. Dotted: new words.", creditLine(item)),
       h("span", { class: "row" }, listen,
         h("button", { class: "linkish muted small", type: "button", onclick: () => { state.settings.showPinyin = !showPinyin; save(); render(); } }, showPinyin ? "Hide pinyin" : "Show pinyin"))));
+}
+
+// Credit for sentences taken from an open collection.
+function creditLine(item) {
+  const credit = item.src == null ? null : creditOf(item);
+  if (!credit) return null;
+  return [" Sentence: ", h("a", { href: credit.url, target: "_blank", rel: "noopener" }, credit.text), ` (${credit.licence}).`];
 }
 
 function markKnown(ch) {
@@ -724,7 +740,7 @@ function summaryView() {
       missed.length ? h("button", { class: "btn primary grow", type: "button", onclick: retryMissed }, missed.length === 1 ? "Retry the 1 missed sentence" : `Retry the ${missed.length} missed sentences`) : null,
       h("button", { class: missed.length ? "btn" : "btn primary grow", type: "button", onclick: () => { P = { phase: "setup" }; render(); } }, "New session")),
     h("h3", {}, "Sentences"),
-    results.map((r) => attemptRow({ ...r.grade, rating: r.rating, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, sentenceNote: r.item.note, answer: r.answer })));
+    results.map((r) => attemptRow({ ...r.grade, rating: r.rating, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, src: r.item.src, ref: r.item.ref, sentenceNote: r.item.note, answer: r.answer })));
 }
 
 // ---------- history ----------
@@ -786,7 +802,7 @@ function settingsView() {
     h("div", { class: "field" },
       h("label", { for: "model" }, "Model"),
       modelPicker("model", (e) => set("model", e.target.value)),
-      h("div", { class: "hint" }, "Used to write sentences, grade answers and answer follow-ups. Prices are each provider's list price per million input / output tokens as of November 2026, charged to your own account; check the provider's pricing page for current figures.")),
+      h("div", { class: "hint" }, "Used to grade answers and answer follow-ups; sentences come from the stored bank, not from AI. Prices are each provider's list price per million input / output tokens as of November 2026, charged to your own account; check the provider's pricing page for current figures.")),
     h("div", { class: "field" },
       h("label", { for: "apikey" }, `${providerName()} API key`),
       keyInput,
@@ -899,7 +915,15 @@ function settingsView() {
         note("danger", "ok", "Everything was deleted.");
       } }, "Delete everything")));
 
-  const about = h("p", { class: "small muted" }, "HSK character levels are derived from the complete-hsk-vocabulary word lists by Yanis Zafirópulos (MIT licence).");
+  const sources = bankReady()?.sources || [];
+  const about = h("section", { class: "card" },
+    h("h2", {}, "Sentence sources and credits"),
+    h("p", { class: "small muted" }, "Practice sentences come from these collections. Each sentence's source is shown under its reference answer."),
+    h("ul", { class: "points small" },
+      sources.map((src) => h("li", {}, src.url ? h("a", { href: src.url, target: "_blank", rel: "noopener" }, src.name) : src.name, ` — ${src.licence}`)),
+      h("li", {}, "Word meanings: ", h("a", { href: "https://www.mdbg.net/chinese/dictionary?page=cc-cedict", target: "_blank", rel: "noopener" }, "CC-CEDICT"), " — CC BY-SA 4.0"),
+      h("li", {}, "HSK levels: ", h("a", { href: "https://github.com/drkameleon/complete-hsk-vocabulary", target: "_blank", rel: "noopener" }, "complete-hsk-vocabulary"), " by Yanis Zafirópulos — MIT")),
+    h("p", { class: "small muted" }, "Chinese Grammar Wiki sentences are licensed for non-commercial use only. Pinyin and word splitting for Tatoeba sentences are added automatically and can contain mistakes."));
   return [apiCard, hanlyCard, hskCard, dataCard, dangerCard, about];
 }
 
@@ -916,6 +940,9 @@ function downloadBackup() {
 // ---------- start ----------
 
 render();
+// Once the bank has loaded, refresh the session screen so it can show how many
+// sentences fit. Other screens are left alone so nothing being typed is lost.
+loadBank().then(() => { if (state.onboarded && view === "practice" && P.phase === "setup") render(); }).catch(() => {});
 
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   navigator.serviceWorker.register("sw.js").catch(() => {});

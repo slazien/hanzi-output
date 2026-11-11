@@ -1,10 +1,10 @@
 // Caches the app's own files so the screens open offline. Requests to the
 // Anthropic and OpenAI APIs are never cached or intercepted.
-const CACHE = "juzi-v9";
+const CACHE = "juzi-v10";
 const SHELL = [
   "./", "index.html", "css/styles.css", "manifest.webmanifest",
   "js/app.js", "js/store.js", "js/known.js", "js/claude.js", "js/openai.js", "js/session.js",
-  "data/hsk.js", "data/grammar.js", "data/themes.js", "vendor/anthropic-sdk.js",
+  "data/hsk.js", "data/grammar.js", "data/themes.js", "data/bank.json", "js/bank.js", "vendor/anthropic-sdk.js",
   "icons/icon.svg", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
 ];
 
