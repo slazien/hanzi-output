@@ -1,10 +1,10 @@
 // Caches the app's own files so the screens open offline. Requests to the
 // Claude API are never cached or intercepted.
-const CACHE = "juzi-v3";
+const CACHE = "juzi-v4";
 const SHELL = [
   "./", "index.html", "css/styles.css", "manifest.webmanifest",
   "js/app.js", "js/store.js", "js/known.js", "js/claude.js", "js/session.js",
-  "data/hsk.js", "data/grammar.js", "vendor/anthropic-sdk.js",
+  "data/hsk.js", "data/grammar.js", "data/themes.js", "vendor/anthropic-sdk.js",
   "icons/icon.svg", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png",
 ];
 

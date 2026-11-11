@@ -3,6 +3,7 @@ import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measu
 import { MODELS, gradeAnswer, followUp } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, hskLabel, PASS_SCORE } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
+import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 const main = document.getElementById("main");
 
@@ -165,6 +166,11 @@ function setupView() {
     save();
   }
 
+  const themeSelect = h("select", { id: "theme", onchange: (e) => set("theme", e.target.value) },
+    h("option", { value: "" }, "Random mix of themes"),
+    THEMES.map((g) => h("optgroup", { label: g.group }, g.items.map((t) => h("option", { value: t }, t)))));
+  themeSelect.value = ALL_THEMES.includes(s.theme) ? s.theme : "";
+
   const pctLabel = h("span", {}, newPctText(s.maxNewPct));
   const slider = h("input", {
     type: "range", id: "maxnew", min: "0", max: "100", step: "5", value: String(s.maxNewPct),
@@ -193,6 +199,10 @@ function setupView() {
       h("div", { class: "stat" }, h("b", {}, known.chars.size), h("span", {}, "characters you know")),
       h("div", { class: "stat" }, h("b", {}, due), h("span", {}, due === 1 ? "sentence due for review" : "sentences due for review"))),
     h("h3", {}, "This session"),
+    h("div", { class: "field" },
+      h("label", { for: "theme" }, "Theme"),
+      themeSelect,
+      h("div", { class: "hint" }, "Practise one theme at a time, or leave it on the random mix.")),
     h("div", { class: "field" },
       h("div", { class: "label" }, "Number of sentences"),
       segmented("sessionLength", [[5, "5"], [10, "10"], [15, "15"], [20, "20"]])),
@@ -247,6 +257,7 @@ function progressBar() {
 function itemTags(item) {
   return h("div", { class: "tags" },
     item.reviewId && h("span", { class: "tag review" }, "Review"),
+    item.theme && h("span", { class: "tag" }, item.theme),
     item.grammar && h("span", { class: "tag hanzi" }, item.grammar),
     item.hsk && h("span", { class: "tag" }, item.hsk),
     h("span", { class: "tag" }, newShareText(item)),
@@ -481,7 +492,7 @@ function attemptRow(a) {
       h("div", { class: "grow" },
         h("div", { class: "en" }, a.english),
         h("div", { class: "zh", lang: "zh-Hans" }, a.answer || "(answer shown)"),
-        a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : ""))),
+        a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : "", a.theme ? ` · ${a.theme}` : ""))),
     h("div", { class: "body" },
       h("h3", {}, "Reference answer", a.hsk ? h("span", { class: "tag inline" }, a.hsk) : null),
       referenceBlock(a, { selected: -1 }),
