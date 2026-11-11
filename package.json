@@ -1,0 +1,13 @@
+{
+  "name": "juzi",
+  "private": true,
+  "description": "Chinese sentence practice with AI feedback. Static site, no build step.",
+  "scripts": {
+    "serve": "python3 -m http.server 8080",
+    "vendor": "echo 'export { default } from \"@anthropic-ai/sdk\";' > .sdk-entry.js && esbuild .sdk-entry.js --bundle --format=esm --platform=browser --minify --outfile=vendor/anthropic-sdk.js && rm .sdk-entry.js"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
+    "esbuild": "^0.25.0"
+  }
+}
