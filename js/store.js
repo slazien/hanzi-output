@@ -7,7 +7,7 @@ const HISTORY_LIMIT = 500;
 
 export const DEFAULTS = {
   settings: {
-    model: "claude-opus-5-5",
+    model: "gpt-6-luna", // the cheapest; see MODELS in claude.js
     knownRule: "reverse", // reverse | normal | both | any
     cutoff: 0.5, // Hanly progressPercent needed to count as known
     maxNewPct: 20, // maximum share of new characters in a sentence

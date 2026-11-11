@@ -1,6 +1,6 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
-import { MODELS, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
+import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
@@ -27,6 +27,12 @@ function h(tag, attrs, ...children) {
 }
 
 const scoreClass = (score) => (score >= PASS_SCORE ? "" : score >= 50 ? "mid" : "low");
+
+// A saved model that is no longer offered falls back to the cheapest one.
+if (!MODELS.some((m) => m.id === state.settings.model)) {
+  state.settings.model = DEFAULT_MODEL;
+  save();
+}
 
 // The provider (Anthropic or OpenAI) of the model currently selected.
 const provider = () => providerOf(state.settings.model);
