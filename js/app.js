@@ -1,7 +1,7 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
-import { buildSession, dueReviews, scheduleReview, recordAttempt, hskLabel, PASS_SCORE } from "./session.js";
+import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
@@ -270,7 +270,7 @@ function progressBar() {
 
 function itemTags(item) {
   return h("div", { class: "tags" },
-    item.reviewId && h("span", { class: "tag review" }, "Review"),
+    item.tries ? h("span", { class: "tag review" }, "Again") : item.reviewId && h("span", { class: "tag review" }, "Review"),
     item.theme && h("span", { class: "tag" }, item.theme),
     item.grammar && h("span", { class: "tag hanzi" }, item.grammar),
     item.hsk && h("span", { class: "tag" }, item.hsk),
@@ -332,9 +332,8 @@ function skipAnswer() {
 
 function finishItem(item, answer, grade) {
   recordAttempt(item, answer, grade);
-  const reviewNote = scheduleReview(item, grade.score);
   P.results.push({ item, answer, grade });
-  P.current = { item, answer, grade, reviewNote, thread: [], selected: -1 };
+  P.current = { item, answer, grade, suggested: suggestRating(grade), rated: false, thread: [], selected: -1 };
   P.phase = "feedback";
   P.error = "";
   render();
@@ -405,7 +404,6 @@ function markWordKnown(word) {
 function feedbackView() {
   const cur = P.current;
   const { item, answer, grade } = cur;
-  const last = P.index >= P.items.length - 1;
   const changed = grade.corrected && grade.corrected.replace(/\s+/g, "") !== answer.replace(/\s+/g, "");
 
   const threadBox = h("div", { class: "thread" }, cur.thread.map((m) => h("div", { class: `bubble ${m.role}` }, m.text)));
@@ -438,7 +436,7 @@ function feedbackView() {
     progressBar(),
     h("div", { class: "result-head" },
       h("div", { class: `score ${scoreClass(grade.score)}`, "aria-label": `Score ${grade.score} out of 100` }, grade.skipped ? "–" : grade.score),
-      h("div", {}, h("div", { class: "verdict" }, grade.verdict), cur.reviewNote && h("div", { class: "muted small" }, cur.reviewNote))),
+      h("div", {}, h("div", { class: "verdict" }, grade.verdict))),
     h("p", { class: "muted" }, item.english),
 
     !grade.skipped && [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, answer)],
@@ -461,9 +459,40 @@ function feedbackView() {
     cur.askError && h("div", { class: "notice error", role: "alert" }, cur.askError),
     h("div", { class: "row" }, h("div", { class: "grow" }, question), h("button", { class: "btn", type: "button", disabled: cur.asking, onclick: ask }, "Ask")),
 
-    h("div", { class: "sticky-actions" },
-      h("button", { class: "btn primary wide", type: "button", onclick: nextItem }, last ? "Finish session" : "Next sentence")));
+    h("div", { class: "rate-box" },
+      h("div", { class: "row between" },
+        h("h3", {}, "How did that feel?"),
+        h("span", { class: "tag" }, `AI suggests: ${RATINGS.find((r) => r.id === cur.suggested).label}`)),
+      h("div", { class: "rates" }, RATINGS.map((r, i) =>
+        h("button", { class: `rate ${r.id}${r.id === cur.suggested ? " suggested" : ""}`, type: "button", "data-r": r.id, onclick: () => rate(r.id) },
+          h("span", { class: "rate-label" }, `${i + 1}. ${r.label}`),
+          h("span", { class: "rate-when" }, intervalText(nextInterval(currentInterval(item), r.id)))))),
+      h("p", { class: "muted small" }, "Your rating decides when this sentence comes back, and moves on to the next one. Forgot and Hard also bring it back at the end of this session.")));
 }
+
+// Applies the rating to the current sentence. A sentence rated Forgot or Hard
+// is added to the end of the session, at most twice.
+function applyRating(rating) {
+  const cur = P.current;
+  if (!cur || cur.rated) return;
+  cur.rated = true;
+  setLastRating(rating);
+  const retry = scheduleReview(cur.item, rating);
+  const tries = cur.item.tries || 0;
+  if (retry && tries < 2) P.items.push({ ...cur.item, id: `${cur.item.id}-r${tries + 1}`, tries: tries + 1 });
+}
+
+function rate(rating) {
+  applyRating(rating);
+  nextItem();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (view !== "practice" || P.phase !== "feedback" || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  const r = RATINGS[Number(e.key) - 1];
+  if (r) rate(r.id);
+});
 
 function nextItem() {
   if (P.index >= P.items.length - 1) return endSession();
@@ -477,6 +506,12 @@ function nextItem() {
 }
 
 function endSession() {
+  // Leaving on a feedback screen without rating: use the AI's suggestion.
+  if (P.phase === "feedback" && P.current && !P.current.rated) {
+    const items = P.items.length;
+    applyRating(P.current.suggested);
+    P.items.length = items; // the session is ending, so no retry is queued
+  }
   P = P.results?.length ? { phase: "summary", results: P.results } : { phase: "setup" };
   render();
   window.scrollTo(0, 0);
@@ -506,7 +541,7 @@ function attemptRow(a) {
       h("div", { class: "grow" },
         h("div", { class: "en" }, a.english),
         h("div", { class: "zh", lang: "zh-Hans" }, a.answer || "(answer shown)"),
-        a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : "", a.theme ? ` · ${a.theme}` : ""))),
+        a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : "", a.rating ? ` · rated ${RATINGS.find((r) => r.id === a.rating)?.label || a.rating}` : "", a.theme ? ` · ${a.theme}` : ""))),
     h("div", { class: "body" },
       h("h3", {}, "Reference answer", a.hsk ? h("span", { class: "tag inline" }, a.hsk) : null),
       referenceBlock(a, { selected: -1 }),

@@ -7,7 +7,8 @@
   --accent: #b3261e;
   --accent-ink: #fffaf2;
   --accent-soft: #f6e3de;
-  --known: #5f7fae;
+  --known: #4c6c9c;
+  --known-soft: #e3eaf4;
   --good: #2f6b4f;
   --good-soft: #e1eee6;
   --warn: #8a5a0b;
@@ -29,7 +30,8 @@
     --accent: #e4695d;
     --accent-ink: #1a1714;
     --accent-soft: #40241f;
-    --known: #7f9fd0;
+    --known: #8fb0e0;
+    --known-soft: #1f2a3a;
     --good: #7fc4a0;
     --good-soft: #1f3329;
     --warn: #e0b45c;
@@ -289,6 +291,25 @@ ul.points li { margin-bottom: 4px; }
 .bubble.assistant { align-self: flex-start; background: var(--paper); border: 1px solid var(--line); }
 
 .sticky-actions { margin-top: 22px; }
+
+/* ---------- self-rating ---------- */
+
+.rate-box { margin-top: 26px; padding-top: 4px; border-top: 1px solid var(--line); }
+.rate-box h3 { margin-top: 16px; }
+.rates { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0 10px; }
+.rate {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 64px; padding: 8px 6px; border-radius: 12px; border: 2px solid transparent; cursor: pointer;
+}
+.rate:active { transform: translateY(1px); }
+.rate-label { font-weight: 650; }
+.rate-when { font-size: 0.82rem; opacity: 0.85; }
+.rate.forgot { background: var(--accent-soft); color: var(--accent); }
+.rate.hard { background: var(--warn-soft); color: var(--warn); }
+.rate.recalled { background: var(--good-soft); color: var(--good); }
+.rate.easy { background: var(--known-soft); color: var(--known); }
+.rate.suggested { border-color: currentColor; }
+@media (max-width: 560px) { .rates { grid-template-columns: repeat(2, 1fr); } }
 
 /* ---------- history ---------- */
 

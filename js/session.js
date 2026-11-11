@@ -7,7 +7,7 @@ import { generateSentences, ClaudeError } from "./claude.js";
 import { ALL_THEMES } from "../data/themes.js";
 
 export const PASS_SCORE = 80;
-const REVIEW_DAYS = [1, 3, 7, 14];
+const LEGACY_DAYS = [1, 3, 7, 14]; // gaps used by review records saved before self-rating
 const DAY = 24 * 60 * 60 * 1000;
 const MAX_ROUNDS = 3;
 
@@ -143,29 +143,68 @@ export async function buildSession(onProgress = () => {}) {
   return items;
 }
 
-// Low scores come back after 1, 3, 7 and 14 days; a pass moves a sentence to
-// the next gap and it is dropped after passing the last one.
-export function scheduleReview(item, score, now = Date.now()) {
-  const passed = score >= PASS_SCORE;
-  const existing = item.reviewId ? state.reviews.find((r) => r.id === item.reviewId) : null;
-  let outcome = "";
-  if (existing) {
-    if (passed) {
-      existing.step += 1;
-      if (existing.step >= REVIEW_DAYS.length) {
-        state.reviews = state.reviews.filter((r) => r !== existing);
-        outcome = "Passed its last review. It will not come back.";
-      } else {
-        existing.due = now + REVIEW_DAYS[existing.step] * DAY;
-        outcome = `Comes back in ${REVIEW_DAYS[existing.step]} days.`;
-      }
-    } else {
-      existing.step = 0;
-      existing.due = now + REVIEW_DAYS[0] * DAY;
-      outcome = "Comes back tomorrow.";
-    }
-  } else if (!passed) {
-    state.reviews.push({
+// ---------- self-rated spaced review ----------
+// After each sentence the learner rates how it went. The rating, not the AI
+// score, decides when the sentence comes back.
+
+export const RATINGS = [
+  { id: "forgot", label: "Forgot" },
+  { id: "hard", label: "Hard" },
+  { id: "recalled", label: "Recalled" },
+  { id: "easy", label: "Easy" },
+];
+const MINUTE = 1 / (24 * 60); // in days
+const RETIRE_AFTER_DAYS = 120; // a sentence this well known stops coming back
+
+function reviewOf(item) {
+  return item.reviewId ? state.reviews.find((r) => r.id === item.reviewId) : null;
+}
+
+// Current gap for a sentence in days (0 for one not yet in review).
+export function currentInterval(item) {
+  const r = reviewOf(item);
+  if (!r) return 0;
+  return r.interval ?? LEGACY_DAYS[r.step] ?? 1;
+}
+
+// The next gap in days for a rating: short retries for Forgot and Hard on new
+// sentences, then gaps that grow each time the sentence is recalled.
+export function nextInterval(prevDays, rating) {
+  if (rating === "forgot") return 10 * MINUTE;
+  if (rating === "hard") return prevDays < 1 ? 15 * MINUTE : prevDays * 1.2;
+  if (rating === "easy") return prevDays < 1 ? 2 : prevDays * 4;
+  return prevDays < 1 ? 1 : prevDays * 2.5;
+}
+
+export function intervalText(days) {
+  if (days < 1 / 24) return `${Math.round(days / MINUTE)} minutes`;
+  if (days < 1) return `${Math.round(days * 24)} hours`;
+  if (days > RETIRE_AFTER_DAYS) return "done";
+  const d = Math.round(days);
+  if (d < 31) return d === 1 ? "1 day" : `${d} days`;
+  const months = Math.round(d / 30);
+  return months === 1 ? "1 month" : `${months} months`;
+}
+
+// What the AI's score would suggest; the learner can overrule it.
+export function suggestRating(grade) {
+  if (grade.skipped || grade.score < 50) return "forgot";
+  if (grade.score < PASS_SCORE) return "hard";
+  return grade.score >= 95 ? "easy" : "recalled";
+}
+
+// Applies a rating. Returns true when the sentence should be retried soon
+// (its new gap is under a day).
+export function scheduleReview(item, rating, now = Date.now()) {
+  const interval = nextInterval(currentInterval(item), rating);
+  let record = reviewOf(item);
+  if (interval > RETIRE_AFTER_DAYS) {
+    if (record) state.reviews = state.reviews.filter((r) => r !== record);
+    save();
+    return false;
+  }
+  if (!record) {
+    record = {
       id: uid(),
       english: item.english,
       chinese: item.chinese,
@@ -173,13 +212,22 @@ export function scheduleReview(item, score, now = Date.now()) {
       grammar: item.grammar,
       theme: item.theme || "",
       note: item.note || "",
-      step: 0,
-      due: now + REVIEW_DAYS[0] * DAY,
-    });
-    outcome = "Added to review. Comes back tomorrow.";
+    };
+    state.reviews.push(record);
+    item.reviewId = record.id;
   }
+  delete record.step;
+  record.interval = interval;
+  record.due = now + interval * DAY;
   save();
-  return outcome;
+  return interval < 1;
+}
+
+export function setLastRating(rating) {
+  if (state.history[0]) {
+    state.history[0].rating = rating;
+    save();
+  }
 }
 
 export function recordAttempt(item, answer, grade) {
