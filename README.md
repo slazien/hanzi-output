@@ -9,7 +9,7 @@ It is a static web app with no server. It can be installed on an iPad from Safar
 - **First-run setup** – on first open, import the Hanly file, add the API key, pick the HSK level you are studying and set the new-character limit. It can be run again from Settings.
 - **Practice** – choose a theme (shopping, eating out, travel and about 35 others) or a random mix, the number of sentences, the largest share of new characters and of new words allowed per sentence (0–100% each), an HSK cap for new characters and grammar, and optionally a grammar pattern. Claude writes the sentences; the app checks each one against your known characters and words and asks for replacements when a sentence breaks a limit.
 - **Feedback** – a score out of 100, your answer corrected, and a reference answer shown with pinyin above each word (can be hidden), the words you know underlined, an HSK tag and a short grammar note. Tap a word for its meaning or to mark it as known. Then what to fix, and a follow-up question box.
-- **Review** – sentences scored below 80 come back after 1, 3, 7 and 14 days, mixed into later sessions.
+- **Self-rating and review** – after each sentence you rate it Forgot, Hard, Recalled or Easy (the AI's score suggests one). The rating sets when the sentence comes back: minutes for Forgot and Hard, which also return at the end of the same session, then gaps that grow each time you recall it. Due sentences are mixed into later sessions.
 - **History** – every attempt with its feedback.
 - **Settings** – model (Anthropic or OpenAI), API key, Hanly import, which Hanly score counts as "known" and its cut-off, HSK version, backup and restore.
 
