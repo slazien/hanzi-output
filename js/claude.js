@@ -3,7 +3,7 @@
 // user's own key, which is read from this device's storage.
 
 import Anthropic from "../vendor/anthropic-sdk.js";
-import { getApiKey } from "./store.js";
+import { getApiKey, cleanApiKey } from "./store.js";
 import { askOpenAI } from "./openai.js";
 
 // Prices are list prices in US dollars per million input / output tokens,
@@ -23,6 +23,10 @@ export class ClaudeError extends Error {}
 function client() {
   const apiKey = getApiKey();
   if (!apiKey) throw new ClaudeError("Add your Anthropic API key in Settings first.");
+  const { bad } = cleanApiKey(apiKey);
+  if (bad.length) {
+    throw new ClaudeError(`The saved Anthropic key contains characters a key cannot have (${bad.slice(0, 5).join(" ")}). Paste the key again in Settings.`);
+  }
   // Browser use is intentional here: this is a single-user app and the key
   // never leaves the user's own device except to reach Anthropic.
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true, maxRetries: 2 });
@@ -43,7 +47,7 @@ function explain(error) {
     return new ClaudeError("Rate limit reached. Wait a moment and try again.");
   }
   if (error instanceof Anthropic.APIConnectionError) {
-    return new ClaudeError("The connection to Anthropic failed or was interrupted. Check your internet connection and try again.");
+    return new ClaudeError(`The connection to Anthropic failed or was interrupted. Check your internet connection and try again. (Details: ${error.cause?.name || error.name}: ${error.cause?.message || error.message}.)`);
   }
   if (error instanceof Anthropic.APIError) {
     return new ClaudeError(`Anthropic returned an error (${error.status ?? "unknown"}): ${error.message}`);
@@ -253,4 +257,16 @@ export async function followUp({ model, item, answer, grade, thread }) {
     messages: thread.map((m) => ({ role: m.role, content: m.text })),
     effort: "low",
   });
+}
+
+// A tiny request to check that the key, the model and the connection work.
+export async function testConnection(model) {
+  const started = Date.now();
+  const reply = await ask({
+    model,
+    system: "You are a connection test. Reply with the single word OK.",
+    messages: [{ role: "user", content: "Reply with OK." }],
+    effort: "low",
+  });
+  return { reply, seconds: (Date.now() - started) / 1000 };
 }
