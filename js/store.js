@@ -63,6 +63,14 @@ export function getApiKey(provider = "anthropic") {
   }
 }
 
+// Removes spaces, line breaks and invisible characters that come along when a
+// key is pasted, and reports characters a key can never contain.
+export function cleanApiKey(value) {
+  const key = String(value || "").replace(/[\s\u200B-\u200D\uFEFF\u00A0]/g, "").replace(/^["'“”‘’]+|["'“”‘’]+$/g, "");
+  const bad = [...new Set([...key].filter((c) => !/[A-Za-z0-9_\-.]/.test(c)))];
+  return { key, bad };
+}
+
 export function setApiKey(value, provider = "anthropic") {
   try {
     if (value) localStorage.setItem(API_KEYS[provider], value);

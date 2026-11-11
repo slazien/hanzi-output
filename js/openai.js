@@ -2,12 +2,13 @@
 // own key. The key is read from this device's storage and sent only to
 // api.openai.com.
 
-import { getApiKey } from "./store.js";
+import { getApiKey, cleanApiKey } from "./store.js";
 
 const URL = "https://api.openai.com/v1/responses";
 
 export async function askOpenAI({ model, system, messages, effort, schema }, fail) {
-  const apiKey = getApiKey("openai");
+  // Spaces and invisible characters saved with an older version are dropped here.
+  const { key: apiKey, bad } = cleanApiKey(getApiKey("openai"));
   if (!apiKey) throw fail("Add your OpenAI API key in Settings first.");
 
   // Streamed, so data keeps flowing while the model works: mobile browsers
@@ -23,7 +24,16 @@ export async function askOpenAI({ model, system, messages, effort, schema }, fai
   };
   if (schema) body.text = { format: { type: "json_schema", name: "result", strict: true, schema } };
 
-  const dropped = () => fail("The connection to OpenAI failed or was interrupted. Check your internet connection and try again.");
+  if (bad.length) {
+    throw fail(`The saved OpenAI key contains characters a key cannot have (${bad.slice(0, 5).join(" ")}). Paste the key again in Settings.`);
+  }
+
+  // Says where the request died and what the browser reported, so a failure
+  // on one device can be told apart from a real network problem.
+  let received = 0;
+  const dropped = (stage, error) => fail(
+    `The connection to OpenAI failed or was interrupted. Check your internet connection and try again. (Details: ${stage}; ${error ? `${error.name}: ${error.message}` : "no error reported"}; ${received} bytes received; key ${apiKey.length} characters.)`
+  );
 
   let response;
   try {
@@ -32,8 +42,8 @@ export async function askOpenAI({ model, system, messages, effort, schema }, fai
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
     });
-  } catch {
-    throw dropped();
+  } catch (error) {
+    throw dropped("the request could not be sent or was blocked", error);
   }
 
   if (!response.ok) {
@@ -70,6 +80,7 @@ export async function askOpenAI({ model, system, messages, effort, schema }, fai
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      received += value.length;
       buffer += decoder.decode(value, { stream: true });
       let end;
       while ((end = buffer.indexOf("\n\n")) >= 0) {
@@ -88,10 +99,10 @@ export async function askOpenAI({ model, system, messages, effort, schema }, fai
     }
   } catch (error) {
     if (error?.fromReply) throw error; // a problem OpenAI reported, not a lost connection
-    throw dropped();
+    throw dropped("the reply stopped while it was being read", error);
   }
   if (refused) throw fail("The model declined this request. Try again or pick a different sentence.");
-  if (!finished) throw dropped();
+  if (!finished) throw dropped("the reply ended before it was complete", null);
   if (!schema) return text.trim();
   try {
     return JSON.parse(text);

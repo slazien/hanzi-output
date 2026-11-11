@@ -1,6 +1,6 @@
-import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
+import { state, save, getApiKey, setApiKey, cleanApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
-import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
+import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, creditOf } from "./bank.js";
@@ -122,7 +122,13 @@ function onboardingView() {
 
   const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: keyHint(),
     // Updated in place (no re-render, no layout shift) so a tap on another control right after typing is not lost.
-    onchange: (e) => { const v = e.target.value.trim(); if (v) { setApiKey(v, provider()); keyStatus.textContent = "Key saved on this device."; } } });
+    onchange: (e) => {
+      const { key, bad } = cleanApiKey(e.target.value);
+      if (!key) return;
+      if (bad.length) { keyStatus.textContent = `Not saved: a key cannot contain ${bad.slice(0, 5).join(" ")}. Paste it again.`; return; }
+      setApiKey(key, provider());
+      keyStatus.textContent = "Key saved on this device.";
+    } });
   const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey(provider()) ? "Key saved on this device." : "No key saved yet.");
 
   const pctLabel = h("span", {}, newPctText(s.maxNewPct));
@@ -790,6 +796,22 @@ function note(section, kind, text) {
   render();
 }
 
+// Settings → Test connection: one small request, reported in full.
+let testing = false;
+async function runConnectionTest() {
+  testing = true;
+  flash = null;
+  render();
+  try {
+    const { reply, seconds } = await testConnection(state.settings.model);
+    testing = false;
+    note("api", "ok", `Connection works: ${providerName()} answered “${reply.slice(0, 40)}” in ${seconds.toFixed(1)} seconds.`);
+  } catch (error) {
+    testing = false;
+    note("api", "error", error.message);
+  }
+}
+
 function settingsView() {
   const s = state.settings;
   const set = (key, value) => { s[key] = value; save(); flash = null; render(); };
@@ -811,9 +833,12 @@ function settingsView() {
       h("button", { class: "btn primary", type: "button", onclick: () => {
         const value = keyInput.value.trim();
         if (!value) return note("api", "error", "Paste a key first.");
-        setApiKey(value, provider());
+        const { key, bad } = cleanApiKey(value);
+        if (bad.length) return note("api", "error", `Not saved: a key cannot contain ${bad.slice(0, 5).join(" ")}. Copy the key again and paste it.`);
+        setApiKey(key, provider());
         note("api", "ok", `${providerName()} key saved on this device.`);
       } }, "Save key"),
+      getApiKey(provider()) && h("button", { class: "btn", type: "button", id: "testconn", disabled: testing, onclick: runConnectionTest }, testing ? "Testing…" : "Test connection"),
       getApiKey(provider()) && h("button", { class: "btn danger", type: "button", onclick: () => { setApiKey("", provider()); note("api", "ok", `${providerName()} key removed from this device.`); } }, "Remove key")));
 
   // --- Hanly
