@@ -45,7 +45,7 @@ function explain(error) {
     return new ClaudeError("Rate limit reached. Wait a moment and try again.");
   }
   if (error instanceof Anthropic.APIConnectionError) {
-    return new ClaudeError("Could not reach Anthropic. Check your internet connection.");
+    return new ClaudeError("The connection to Anthropic failed or was interrupted. Check your internet connection and try again.");
   }
   if (error instanceof Anthropic.APIError) {
     return new ClaudeError(`Anthropic returned an error (${error.status ?? "unknown"}): ${error.message}`);
@@ -55,11 +55,13 @@ function explain(error) {
 
 async function ask({ model, system, messages, effort, schema }) {
   if (providerOf(model) === "openai") {
-    return askOpenAI({ model, system, messages, schema }, (message) => new ClaudeError(message));
+    return askOpenAI({ model, system, messages, effort, schema }, (message) => new ClaudeError(message));
   }
   let response;
   try {
-    response = await client().beta.messages.create({
+    // Streamed, so data keeps flowing while the model works: mobile browsers
+    // drop a connection that stays silent for about a minute.
+    const stream = client().beta.messages.stream({
       model,
       max_tokens: 16000,
       system,
@@ -72,6 +74,7 @@ async function ask({ model, system, messages, effort, schema }) {
         ...(schema ? { format: { type: "json_schema", schema } } : {}),
       },
     });
+    response = await stream.finalMessage();
   } catch (error) {
     throw explain(error);
   }
