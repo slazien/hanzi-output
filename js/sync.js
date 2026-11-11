@@ -4,11 +4,12 @@
 // from this device's storage alone, exactly as before.
 
 import { createClient } from "../vendor/supabase.js";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+import { SUPABASE_URL, SUPABASE_KEY, EMAIL_SIGN_IN } from "./config.js";
 import { state, save, onSave, replaceState } from "./store.js";
 import { mergeStates } from "./merge.js";
 
 export const accountsEnabled = Boolean(SUPABASE_URL && SUPABASE_KEY);
+export const emailSignIn = Boolean(EMAIL_SIGN_IN);
 export const status = { email: "", syncing: false, lastSync: 0, error: "", google: false };
 
 const PUSH_DELAY = 20000; // wait this long after the last change before uploading
