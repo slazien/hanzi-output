@@ -5,7 +5,7 @@
 import Anthropic from "../vendor/anthropic-sdk.js";
 import { getApiKey, cleanApiKey } from "./store.js";
 import { askOpenAI, OPENAI_MODULE_VERSION } from "./openai.js";
-import { CATEGORIES } from "./insight.js";
+import { GRADE_SCHEMA, GRADE_SYSTEM, gradeRequest, normaliseGrade } from "./grading.js";
 
 export const MODULE_VERSION = OPENAI_MODULE_VERSION ?? 0;
 
@@ -122,16 +122,6 @@ const SENTENCES_SCHEMA = obj({
   },
 });
 
-const GRADE_SCHEMA = obj({
-  score: { type: "integer" },
-  verdict: str,
-  corrected: str,
-  strengths: { type: "array", items: str },
-  issues: { type: "array", items: obj({ quote: str, problem: str, fix: str, category: { type: "string", enum: Object.keys(CATEGORIES) } }) },
-  weak_points: { type: "array", items: str },
-  note: str,
-});
-
 const GENERATE_SYSTEM = `You write English-to-Chinese translation exercises for one adult learner of Mandarin who reads and writes simplified characters.
 
 For each exercise give:
@@ -199,49 +189,16 @@ export async function generateSentences({ model, count, known, knownWords, maxNe
   return Array.isArray(result?.sentences) ? result.sentences : [];
 }
 
-const GRADE_SYSTEM = `You grade one learner's English-to-Chinese translation. The learner writes simplified characters.
-
-Judge the learner's answer on whether it is correct, natural Mandarin that conveys the English sentence. The reference translation is only one valid answer: accept any other correct wording, word order or synonym at full marks. Ignore missing or different punctuation. If a grammar pattern is named, the answer should use it; otherwise note that in an issue.
-
-Return:
-- "score": 0-100. 90+ correct and natural; 70-89 understandable with minor errors; 40-69 meaning partly lost or clear grammar errors; below 40 mostly wrong or empty.
-- "verdict": three to six words summarising the result.
-- "corrected": the learner's own sentence with the smallest changes that make it correct. If it is already correct, repeat it unchanged.
-- "strengths": zero to three short points about what the learner got right, naming the words or structure.
-- "issues": each real mistake (at most three, the most important first), with "quote" (the wrong part of their answer, or "" if something is missing), "problem" (why it is wrong, in plain English), "fix" (the corrected Chinese) and "category", the one label that best describes the mistake:
-  word_choice (a wrong or unnatural word), measure_word, aspect (了 / 过 / 着), word_order, ba_bei (把 or 被 constructions), complement (result, direction, degree or potential complements), particle (的 / 地 / 得 / 吗 / 呢 / 吧), preposition (在 / 给 / 对 / 跟 / 从 and similar), negation (不 / 没 and adverb placement), connector (linking clauses: 因为, 但是, 如果 ...), missing_word, extra_word, character (a wrong or mistyped character), other.
-  Do not list a valid alternative wording as an issue. Empty when there are no mistakes.
-- "weak_points": up to three Chinese words or grammar patterns, written in Chinese characters only (for example 相机 or 把), that the learner got wrong or clearly did not know in this answer. Empty when the answer was correct.
-- "note": one or two sentences of the most useful advice for next time, or "" if there is nothing to add.
-
-Write explanations in English. Be accurate and direct; do not praise wrong answers.`;
-
-export async function gradeAnswer({ model, english, reference, answer, grammar }) {
-  const content = [
-    `English sentence: ${english}`,
-    `Reference translation: ${reference}`,
-    grammar ? `Grammar pattern being practised: ${grammar}` : "",
-    `Learner's answer: ${answer}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+// `dispute` is the earlier verdict when the learner asks for a second opinion.
+export async function gradeAnswer({ model, english, reference, answer, grammar, dispute }) {
   const result = await ask({
     model,
     system: GRADE_SYSTEM,
-    messages: [{ role: "user", content }],
+    messages: [{ role: "user", content: gradeRequest({ english, reference, answer, grammar, dispute }) }],
     effort: "medium",
     schema: GRADE_SCHEMA,
   });
-  const score = Math.max(0, Math.min(100, Math.round(Number(result.score) || 0)));
-  return {
-    score,
-    verdict: String(result.verdict || ""),
-    corrected: String(result.corrected || ""),
-    strengths: (result.strengths || []).map(String).filter(Boolean),
-    issues: (result.issues || []).filter((i) => i && (i.problem || i.fix)).slice(0, 3),
-    weak: (result.weak_points || []).map((w) => String(w).replace(/[^\u4e00-\u9fff]/g, "")).filter(Boolean).slice(0, 3),
-    note: String(result.note || ""),
-  };
+  return normaliseGrade(result);
 }
 
 const FOLLOWUP_SYSTEM = `You are a Mandarin tutor answering a learner's follow-up questions about one translation exercise they just did. Answer in English, briefly and concretely, with short Chinese examples (simplified characters with pinyin) where they help. Plain text only: no markdown, headings or bullet symbols.`;

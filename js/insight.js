@@ -23,6 +23,11 @@ export const CATEGORIES = {
   other: "Other",
 };
 
+// Labels for display. "natural" is recorded by the app when an answer was
+// correct but not how a native speaker would say it; the grader cannot pick it
+// as a mistake type.
+export const CATEGORY_LABELS = { ...CATEGORIES, natural: "Natural phrasing" };
+
 // Bank sentences that exercise a category, where a simple test exists.
 export const CATEGORY_RE = {
   measure_word: "[一二两三四五六七八九十几这那每][个本杯件只张条位口家块辆双]",
@@ -92,10 +97,10 @@ export function weakAreas(log, now = Date.now()) {
         detail: `missed about ${Math.round(rate * 100)}% of ${a.raw} recent ${a.raw === 1 ? "sentence" : "sentences"}` });
     } else if (a.kind === "category") {
       // Share of graded answers that had this kind of mistake.
-      if (a.e < 2 || !CATEGORIES[a.key] || a.key === "other") continue;
+      if (a.e < 2 || !CATEGORY_LABELS[a.key] || a.key === "other") continue;
       const rate = a.e / Math.max(graded, 1);
       if (rate < 0.12) continue;
-      out.push({ ...a, rate, strength: 1 + rate * 6, label: CATEGORIES[a.key],
+      out.push({ ...a, rate, strength: 1 + rate * 6, label: CATEGORY_LABELS[a.key],
         detail: `in about ${Math.round(rate * 100)}% of recent answers (${a.raw} times)` });
     } else if (a.e >= 1.6) {
       out.push({ ...a, rate: 1, strength: 1 + a.e / 2, label: a.key, detail: `missed ${a.raw} times recently` });

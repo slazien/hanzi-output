@@ -347,6 +347,13 @@ a { color: inherit; }
 .score.sm { width: 44px; height: 44px; font-size: 1rem; }
 .verdict { font-size: 1.25rem; font-weight: 650; line-height: 1.3; }
 
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+.chip { font-size: 0.82rem; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); }
+.chip.good { background: var(--good-soft); color: var(--good); }
+.chip.mid { background: var(--warn-soft); color: var(--warn); }
+.chip.low { background: var(--accent-soft); color: var(--bad); }
+.dispute { margin: 18px 0 0; }
+
 /* Chinese is the largest thing on the page. */
 .line-zh { font: 2rem/1.6 var(--hanzi); margin: 0; word-break: break-all; }
 .line-zh.sm { font-size: 1.6rem; }

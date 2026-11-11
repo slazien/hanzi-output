@@ -1,15 +1,16 @@
 import { state, save, getApiKey, setApiKey, cleanApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, hskAllowed, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection, MODULE_VERSION } from "./claude.js";
-import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday } from "./session.js";
+import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday, recordDispute } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
+import { MEANING_LABEL, ACCURACY_LABEL, NATURALNESS_LABEL, CONVENTIONS } from "./grading.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
 import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow, deleteSynced } from "./sync.js";
-import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORIES } from "./insight.js";
+import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORY_LABELS as CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 22;
+const APP_VERSION = 23;
 
 const main = document.getElementById("main");
 
@@ -585,6 +586,25 @@ function markWordKnown(word) {
   render();
 }
 
+// The three separate judgements behind the score.
+function ratingChips(g) {
+  if (!g.meaning) return null;
+  const tone = { full: "good", correct: "good", natural: "good", mostly: "mid", minor_errors: "mid", acceptable_marked: "mid", partly: "low", wrong: "low", major_errors: "low", unnatural: "mid" };
+  const chip = (value, label) => (label ? h("span", { class: `chip ${tone[value] || ""}` }, label) : null);
+  return h("div", { class: "chips" }, chip(g.meaning, MEANING_LABEL[g.meaning]), chip(g.accuracy, ACCURACY_LABEL[g.accuracy]), chip(g.naturalness, NATURALNESS_LABEL[g.naturalness]));
+}
+
+// "Correct, but a native speaker would say ...": shown apart from mistakes.
+function naturalBlock(g) {
+  if (!g.naturalVersion) return null;
+  return [
+    h("h3", {}, g.naturalnessSure ? "How a native speaker would say it" : "A native speaker might say"),
+    h("p", { class: "line-zh sm", lang: "zh-Hans" }, g.naturalVersion),
+    g.naturalnessNote && h("p", {}, g.naturalnessNote),
+    !g.naturalnessSure && h("p", { class: "muted small" }, "This is a matter of preference; your version is also used."),
+  ];
+}
+
 const issueList = (issues) => issues.map((i) =>
   h("div", { class: "issue" },
     h("div", {}, i.quote && h("span", { class: "quote", lang: "zh-Hans" }, i.quote), i.fix && h("span", { class: "fix", lang: "zh-Hans" }, i.fix)),
@@ -673,11 +693,15 @@ function feedbackView() {
     h("div", { class: "result-head" },
       h("div", { class: `score ${grade.skipped ? "none" : scoreClass(grade.score)}`, "aria-label": grade.skipped ? "Answer shown" : `Score ${grade.score} out of 100` }, grade.skipped ? "–" : grade.score),
       h("div", {}, h("div", { class: "verdict" }, grade.verdict), h("div", { class: "muted" }, item.english))),
+    !grade.skipped && ratingChips(grade),
+    cur.regraded && h("p", { class: "muted small", role: "status" }, cur.regraded),
 
     grade.issues.length ? [h("h3", {}, "What to fix"), issueList(grade.issues)] : null,
 
     !grade.skipped && [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, changed ? diffLine(mine, "del") : answer)],
     changed && [h("h3", {}, "Corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(fixed, "chg"))],
+
+    !grade.skipped && naturalBlock(grade),
 
     h("h3", {}, "Reference answer", item.hsk ? h("span", { class: "tag inline" }, item.hsk) : null),
     referenceBlock(item, cur),
@@ -691,6 +715,11 @@ function feedbackView() {
       item.note && [h("h3", {}, "About this sentence"), h("p", {}, item.note)],
       grade.strengths.length ? [h("h3", {}, "What worked"), h("ul", { class: "points" }, grade.strengths.map((t) => h("li", {}, t)))] : null,
       grade.note && [h("h3", {}, "For next time"), h("p", {}, grade.note)]) : null,
+
+    !grade.skipped && h("p", { class: "dispute" },
+      cur.disputed
+        ? h("span", { class: "muted small" }, "This answer has had a second opinion.")
+        : h("button", { class: "linkish muted small", type: "button", id: "dispute", disabled: cur.regrading, onclick: disputeGrade }, cur.regrading ? "Grading again…" : "I disagree with this grade")),
 
     h("h3", {}, "Ask a follow-up"),
     threadBox,
@@ -707,6 +736,31 @@ function feedbackView() {
           h("span", { class: "rate-label" }, `${i + 1}. ${r.label}`),
           h("span", { class: "rate-when" }, intervalText(previewInterval(item, r.id)))))),
       h("p", { class: "muted small" }, "Your rating decides when this sentence comes back, and moves on. Forgot and Hard also bring it back at the end of this session. Return accepts the suggestion.")));
+}
+
+// "I disagree with this grade": the answer is graded once more from scratch,
+// with the first verdict shown to the grader as the thing in dispute. The
+// new grade replaces the old one, and both are kept for later review.
+async function disputeGrade() {
+  const cur = P.current;
+  if (!cur || cur.regrading || cur.disputed || cur.rated) return;
+  cur.regrading = true;
+  render();
+  const before = cur.grade;
+  const said = [`score ${before.score}`, before.verdict, ...before.issues.map((i) => `${i.quote || "(missing)"} -> ${i.fix}: ${i.problem}`), before.naturalVersion ? `more natural: ${before.naturalVersion}` : ""].filter(Boolean).join("; ");
+  try {
+    const after = await gradeAnswer({ model: state.settings.model, english: cur.item.english, reference: cur.item.chinese, answer: cur.answer, grammar: cur.item.grammar, dispute: said });
+    recordDispute(cur.item, cur.answer, before, after);
+    cur.grade = after;
+    cur.result.grade = after;
+    cur.suggested = suggestRating(after);
+    cur.disputed = true;
+    cur.regraded = after.score === before.score ? `Graded again: the result is the same (${after.score}).` : `Graded again: ${before.score} became ${after.score}.`;
+  } catch (error) {
+    cur.regraded = `Could not grade again: ${error.message}`;
+  }
+  cur.regrading = false;
+  if (P.current === cur) render();
 }
 
 // Applies the rating to the current sentence. A sentence rated Forgot or Hard
@@ -801,8 +855,10 @@ function attemptRow(a) {
         a.answer ? h("div", { class: "zh", lang: "zh-Hans" }, a.answer) : h("div", { class: "muted small" }, "Answer shown"),
         h("div", { class: "when" }, [a.at && new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review && "review", a.rating && `rated ${RATINGS.find((r) => r.id === a.rating)?.label || a.rating}`, a.theme].filter(Boolean).join(" · ")))),
     h("div", { class: "body" },
+      a.answer && ratingChips(a),
       a.issues?.length ? [h("h3", {}, "What to fix"), issueList(a.issues)] : null,
       changed && [h("h3", {}, "Corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(diffChars(a.answer, a.corrected)[1], "chg"))],
+      a.answer && naturalBlock(a),
       h("h3", {}, "Reference answer", a.hsk ? h("span", { class: "tag inline" }, a.hsk) : null),
       referenceBlock(a, { selected: -1 }),
       a.sentenceNote && [h("h3", {}, "About this sentence"), h("p", {}, a.sentenceNote)],
