@@ -4,12 +4,12 @@ import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, te
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
-import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow } from "./sync.js";
+import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow, deleteSynced } from "./sync.js";
 import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 20;
+const APP_VERSION = 21;
 
 const main = document.getElementById("main");
 
@@ -1032,14 +1032,18 @@ function accountCard() {
       h("p", { class: "small muted" }, "Your progress is saved to your account and kept in step on every device where you sign in. API keys stay on each device and are never uploaded."),
       h("div", { class: "row" },
         h("button", { class: "btn", type: "button", disabled: syncStatus.syncing, onclick: () => syncNow() }, "Sync now"),
-        h("button", { class: "btn", type: "button", disabled: account.busy, onclick: () => run(signOut, "") }, "Sign out")));
+        h("button", { class: "btn", type: "button", disabled: account.busy, onclick: () => run(signOut, "") }, "Sign out"),
+        h("button", { class: "btn danger", type: "button", id: "acct-delete", disabled: account.busy, onclick: () => {
+          if (!confirm("Delete the practice data saved in your account and sign out? What is on this device stays here.")) return;
+          run(deleteSynced, "Your synced data was deleted from your account and you were signed out. The copy on this device is untouched.");
+        } }, "Delete my synced data")));
   }
   const email = h("input", { type: "text", id: "acct-email", inputmode: "email", autocomplete: "email", autocapitalize: "off", placeholder: "you@example.com", value: account.email, oninput: (e) => { account.email = e.target.value.trim(); } });
   const code = h("input", { type: "text", id: "acct-code", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "6-digit code" });
   return h("section", { class: "card" },
     h("h2", {}, "Account"),
     flashFor("account"),
-    h("p", { class: "small muted" }, "Optional. Sign in to keep your progress safe and in step across devices. What is on this device now is combined with your account, not replaced."),
+    h("p", { class: "small muted" }, "Optional. Sign in to keep your progress safe and in step across devices. What is on this device now is combined with your account, not replaced. See the ", h("a", { href: "privacy.html" }, "privacy policy"), "."),
     syncStatus.google && h("div", { class: "field" }, h("button", { class: "btn wide", type: "button", id: "acct-google", disabled: account.busy, onclick: () => run(signInWithGoogle, "") }, "Continue with Google")),
     !syncStatus.google && !emailSignIn && h("p", { class: "muted small" }, "Checking which sign-in options are available…"),
     emailSignIn && [
@@ -1201,6 +1205,7 @@ function settingsView() {
       h("li", {}, "Word meanings: ", h("a", { href: "https://www.mdbg.net/chinese/dictionary?page=cc-cedict", target: "_blank", rel: "noopener" }, "CC-CEDICT"), " — CC BY-SA 4.0"),
       h("li", {}, "HSK levels: ", h("a", { href: "https://github.com/drkameleon/complete-hsk-vocabulary", target: "_blank", rel: "noopener" }, "complete-hsk-vocabulary"), " by Yanis Zafirópulos — MIT")),
     h("p", { class: "small muted" }, "Chinese Grammar Wiki sentences are licensed for non-commercial use only. Pinyin and word splitting for Tatoeba sentences are added automatically and can contain mistakes."),
+    h("p", { class: "small muted" }, h("a", { href: "about.html" }, "About Juzi"), " · ", h("a", { href: "privacy.html" }, "Privacy policy"), " · ", h("a", { href: "terms.html" }, "Terms of use")),
     h("p", { class: "small muted", id: "version" }, MODULE_VERSION === APP_VERSION
       ? `App version ${APP_VERSION}.`
       : `App version ${APP_VERSION}, but an older part (${MODULE_VERSION}) is still loaded. Reload the page.`));

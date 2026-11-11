@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>About — Juzi</title>
+  <meta name="description" content="Juzi is a free web app for practising Chinese by translating whole sentences and getting feedback.">
+  <meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="about.html"><span class="seal" aria-hidden="true">句</span><span class="brand-name">Juzi</span></a>
+    <nav class="tabs" aria-label="Pages">
+      <a class="tab" href="./">Open the app</a>
+      <a class="tab" href="about.html">About</a>
+      <a class="tab" href="privacy.html">Privacy</a>
+      <a class="tab" href="terms.html">Terms</a>
+    </nav>
+  </header>
+  <main class="doc">
+    <section class="card">
+      <h1>Juzi 句子: Chinese sentence practice</h1>
+      <p class="lede">Juzi is a free, non-commercial web app for learners of Mandarin Chinese. You read an English sentence, write it in simplified Chinese, and get your answer graded and explained.</p>
+      <p><a class="btn primary" href="./">Open the app</a></p>
+
+      <h2>What it does</h2>
+      <ul class="points">
+        <li><b>Whole-sentence practice.</b> Sentences come from a stored bank of about 18,000, chosen to fit the characters and words you already know.</li>
+        <li><b>Feedback on your answer.</b> An AI model scores your translation, shows a corrected version and a reference answer with pinyin, and answers follow-up questions. It uses your own OpenAI or Anthropic API key.</li>
+        <li><b>Spaced review.</b> You rate each sentence, and it comes back when you are likely to be about to forget it.</li>
+        <li><b>Weak areas and progress.</b> The app shows which themes, grammar patterns and kinds of mistake need work, and how your results change over time.</li>
+      </ul>
+
+      <h2>Accounts and Google sign-in</h2>
+      <p>The app works without an account, keeping your progress in your browser. Signing in is optional. If you choose <b>Continue with Google</b>, Juzi uses your Google account only to identify you, so that your practice progress can be saved to your account and kept in step across your devices.</p>
+      <p>Juzi asks Google for your basic profile: your email address, name and profile picture. It does not ask for, and cannot read, your contacts, email, files or anything else in your Google account. See the <a href="privacy.html">privacy policy</a> for details.</p>
+
+      <h2>Who makes it</h2>
+      <p>Juzi is a personal project maintained by the GitHub user <a href="https://github.com/slazien">slazien</a>. The source code is public at <a href="https://github.com/slazien/hanzi-output">github.com/slazien/hanzi-output</a>. Questions and requests can be raised at <a href="https://github.com/slazien/hanzi-output/issues">github.com/slazien/hanzi-output/issues</a>.</p>
+      <p>Sentence sources and their licences are listed in the app under Settings.</p>
+    </section>
+    <p class="small muted">Juzi · <a href="about.html">About</a> · <a href="privacy.html">Privacy policy</a> · <a href="terms.html">Terms of use</a> · <a href="https://github.com/slazien/hanzi-output">Source code</a></p>
+  </main>
+</body>
+</html>

@@ -505,5 +505,14 @@ ul.points li { margin-bottom: 4px; }
 }
 .danger-zone { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
 
+/* ---------- information pages (about, privacy, terms) ---------- */
+
+a.tab, a.brand { text-decoration: none; color: inherit; }
+a.tab { display: inline-flex; align-items: center; color: var(--muted); }
+.doc h2 { margin-top: 26px; font-size: 1.15rem; }
+.doc p, .doc li { line-height: 1.6; }
+.doc ul.points { margin-bottom: 12px; }
+.doc a.btn { text-decoration: none; }
+
 .noscript { padding: 24px; text-align: center; }
 [hidden] { display: none !important; }

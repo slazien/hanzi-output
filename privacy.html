@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Privacy policy — Juzi</title>
+  <meta name="description" content="What data the Juzi Chinese practice app handles, where it is kept, and how to delete it.">
+  <meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="about.html"><span class="seal" aria-hidden="true">句</span><span class="brand-name">Juzi</span></a>
+    <nav class="tabs" aria-label="Pages">
+      <a class="tab" href="./">Open the app</a>
+      <a class="tab" href="about.html">About</a>
+      <a class="tab" href="privacy.html">Privacy</a>
+      <a class="tab" href="terms.html">Terms</a>
+    </nav>
+  </header>
+  <main class="doc">
+    <section class="card">
+      <h1>Privacy policy</h1>
+      <p class="muted">Last updated: 11 November 2026</p>
+      <p>Juzi is a personal, non-commercial web app for practising Chinese, maintained by the GitHub user <a href="https://github.com/slazien">slazien</a> ("we"). This page explains what data the app handles. It has no advertising and no analytics or tracking scripts.</p>
+
+      <h2>If you use the app without signing in</h2>
+      <p>Everything stays in your browser on your device: your settings, the progress file you import, your practice history and review schedule, and any API key you enter. None of it is sent to us.</p>
+
+      <h2>If you sign in with Google</h2>
+      <p>Signing in is optional. When you choose "Continue with Google", we receive from Google:</p>
+      <ul class="points">
+        <li>your email address;</li>
+        <li>your name and profile picture, as part of your basic Google profile;</li>
+        <li>an identifier for your Google account.</li>
+      </ul>
+      <p>We use this only to create your account and to recognise you when you sign in again. We do not request access to any other Google data, and we do not use Google user data for advertising or share it with anyone except the service that stores it for us, named below.</p>
+      <p>When you are signed in, the app also saves your <b>practice data</b> to your account so it can be restored and kept in step across your devices: your settings, the characters and words marked as known (including the contents of a progress file you imported), your practice history with your answers and the feedback on them, and your review schedule.</p>
+
+      <h2>Where account data is kept</h2>
+      <p>Accounts and practice data are stored with <a href="https://supabase.com">Supabase</a>, a database hosting service, on servers in the United States. Access rules in the database allow each signed-in person to read and change only their own data. Supabase processes this data on our behalf under its own <a href="https://supabase.com/privacy">privacy policy</a>.</p>
+
+      <h2>AI grading</h2>
+      <p>To grade an answer or reply to a follow-up question, the app sends the sentence, your answer and your question directly from your browser to the AI provider you selected (OpenAI or Anthropic), using <b>your own API key</b>. That request is governed by your agreement with that provider. Your API key is stored only in your browser; it is never sent to us and never saved to your account.</p>
+
+      <h2>Hosting</h2>
+      <p>The app's pages are served by GitHub Pages. Like any web host, GitHub may log technical information such as your IP address when your browser loads the pages; see <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>. The app sets no cookies of its own; it uses your browser's local storage to keep your data and your sign-in session.</p>
+
+      <h2>How long data is kept, and deleting it</h2>
+      <ul class="points">
+        <li><b>On your device:</b> data stays until you delete it in the app (Settings → Delete data) or clear the site's data in your browser.</li>
+        <li><b>In your account:</b> data stays until you delete it. In the app, Settings → Account → "Delete my synced data" removes your practice data from the server and signs you out.</li>
+        <li><b>The account itself</b> (your email address, name and Google identifier): ask us to remove it by opening a request at <a href="https://github.com/slazien/hanzi-output/issues">github.com/slazien/hanzi-output/issues</a>. Do not include personal details in a public request beyond what is needed to identify the account; we will arrange the rest privately.</li>
+      </ul>
+      <p>You can also withdraw Juzi's access to your Google account at any time at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+
+      <h2>Children</h2>
+      <p>The app is not directed at children under 13, and we do not knowingly collect data from them.</p>
+
+      <h2>Changes and contact</h2>
+      <p>If this policy changes, the new version will be posted here with a new date. For questions or requests about your data, open a request at <a href="https://github.com/slazien/hanzi-output/issues">github.com/slazien/hanzi-output/issues</a>.</p>
+    </section>
+    <p class="small muted">Juzi · <a href="about.html">About</a> · <a href="privacy.html">Privacy policy</a> · <a href="terms.html">Terms of use</a> · <a href="https://github.com/slazien/hanzi-output">Source code</a></p>
+  </main>
+</body>
+</html>

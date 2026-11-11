@@ -38,3 +38,20 @@ An **Account** section then appears at the top of Settings.
 - Free Supabase projects pause after about a week without activity and are restored from the dashboard. Nothing is lost on a device while the project is paused; sync resumes afterwards.
 - Signing in combines what is on the device with the account: attempts and history from both are kept, each review sentence keeps its most recently reviewed copy, and the most recently changed settings win.
 - Sign in with Apple is not set up. It needs a paid Apple Developer membership.
+
+## Google branding page
+
+To let anyone with a Google account sign in, publish the Google app (Google Auth Platform → Audience → Publish app). The branding page can be filled in with:
+
+| Field | Value |
+|---|---|
+| App name | `Juzi` |
+| User support email | your own address (shown to people on the sign-in screen) |
+| App logo | [`icons/logo-120.png`](../icons/logo-120.png) (120 × 120 PNG) |
+| Application home page | `https://slazien.github.io/hanzi-output/about.html` |
+| Application privacy policy link | `https://slazien.github.io/hanzi-output/privacy.html` |
+| Application terms of service link | `https://slazien.github.io/hanzi-output/terms.html` |
+| Authorized domains | `slazien.github.io` and `rdoyjipdxqvoadbytbji.supabase.co` |
+| Developer contact information | your own address (only Google sees it) |
+
+Uploading a logo makes Google ask for brand verification, which includes proving ownership of the home page's domain in Google Search Console. Leaving the logo out avoids that review; the sign-in screen then shows the Supabase address instead of the app's name.

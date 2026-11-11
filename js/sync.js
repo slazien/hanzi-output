@@ -74,6 +74,16 @@ export async function signOut() {
   await client.auth.signOut();
 }
 
+// Removes this account's practice data from the server and signs out. What is
+// on this device stays here.
+export async function deleteSynced() {
+  clearTimeout(timer);
+  dirty = false;
+  const { error } = await client.from("progress").delete().eq("user_id", session.user.id);
+  if (error) throw new Error(friendly(error));
+  await client.auth.signOut();
+}
+
 // Downloads the account's copy, merges it with this device's record by
 // record, and uploads the result. The row carries a version number: if
 // another device saved in between, the upload is refused and we merge again.
