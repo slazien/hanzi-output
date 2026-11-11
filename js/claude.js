@@ -1,14 +1,24 @@
-// Talks to the Claude API directly from the browser with the user's own key.
-// The key is read from this device's storage and sent only to api.anthropic.com.
+// Sentence generation, grading and follow-ups. Requests go straight from the
+// browser to the chosen provider (Anthropic here, OpenAI in openai.js) with the
+// user's own key, which is read from this device's storage.
 
 import Anthropic from "../vendor/anthropic-sdk.js";
 import { getApiKey } from "./store.js";
+import { askOpenAI } from "./openai.js";
 
+// Prices are list prices in US dollars per million input / output tokens,
+// checked in November 2026. They are shown for comparison only.
+export const PROVIDERS = { anthropic: "Anthropic", openai: "OpenAI" };
 export const MODELS = [
-  { id: "claude-opus-5-5", label: "Claude Opus 5.5 — strongest grading" },
-  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 — faster, cheaper" },
-  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 — fastest, cheapest" },
+  { id: "claude-opus-5-5", provider: "anthropic", label: "Claude Opus 5.5", price: "$4 / $20" },
+  { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", price: "$2 / $10" },
+  { id: "claude-haiku-5-5", provider: "anthropic", label: "Claude Haiku 5.5", price: "$0.10 / $0.50" },
+  { id: "gpt-6-astra", provider: "openai", label: "GPT-6 Astra", price: "$10 / $50" },
+  { id: "gpt-6.1-sol", provider: "openai", label: "GPT-6.1 Sol", price: "$2 / $10" },
+  { id: "gpt-6.1-terra", provider: "openai", label: "GPT-6.1 Terra", price: "$1 / $5" },
+  { id: "gpt-6-luna", provider: "openai", label: "GPT-6 Luna", price: "$0.10 / $0.50" },
 ];
+export const providerOf = (model) => MODELS.find((m) => m.id === model)?.provider || "anthropic";
 
 export class ClaudeError extends Error {}
 
@@ -44,6 +54,9 @@ function explain(error) {
 }
 
 async function ask({ model, system, messages, effort, schema }) {
+  if (providerOf(model) === "openai") {
+    return askOpenAI({ model, system, messages, schema }, (message) => new ClaudeError(message));
+  }
   let response;
   try {
     response = await client().beta.messages.create({
@@ -63,10 +76,10 @@ async function ask({ model, system, messages, effort, schema }) {
     throw explain(error);
   }
   if (response.stop_reason === "refusal") {
-    throw new ClaudeError("Claude declined this request. Try again or pick a different sentence.");
+    throw new ClaudeError("The model declined this request. Try again or pick a different sentence.");
   }
   if (response.stop_reason === "max_tokens") {
-    throw new ClaudeError("Claude's reply was cut off. Try again.");
+    throw new ClaudeError("The reply was cut off. Try again.");
   }
   const text = response.content
     .filter((block) => block.type === "text")
@@ -76,7 +89,7 @@ async function ask({ model, system, messages, effort, schema }) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new ClaudeError("Claude's reply could not be read. Try again.");
+    throw new ClaudeError("The model's reply could not be read. Try again.");
   }
 }
 

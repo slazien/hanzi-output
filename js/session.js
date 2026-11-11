@@ -139,7 +139,7 @@ export async function buildSession(onProgress = () => {}) {
     if (fresh.length) items.push(fresh.shift());
     if (rev.length) items.push(rev.shift());
   }
-  if (!items.length) throw new ClaudeError("Claude did not return any usable sentences. Try again.");
+  if (!items.length) throw new ClaudeError("The model did not return any usable sentences. Try again.");
   return items;
 }
 

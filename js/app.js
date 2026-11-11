@@ -1,6 +1,6 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
-import { MODELS, gradeAnswer, followUp } from "./claude.js";
+import { MODELS, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, hskLabel, PASS_SCORE } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
@@ -27,6 +27,18 @@ function h(tag, attrs, ...children) {
 }
 
 const scoreClass = (score) => (score >= PASS_SCORE ? "" : score >= 50 ? "mid" : "low");
+
+// The provider (Anthropic or OpenAI) of the model currently selected.
+const provider = () => providerOf(state.settings.model);
+const providerName = () => PROVIDERS[provider()];
+const keyHint = () => (provider() === "openai" ? "sk-…" : "sk-ant-…");
+function modelPicker(id, onchange) {
+  const select = h("select", { id, onchange },
+    Object.entries(PROVIDERS).map(([key, name]) => h("optgroup", { label: name },
+      MODELS.filter((m) => m.provider === key).map((m) => h("option", { value: m.id }, `${m.label} — ${m.price} per million tokens`)))));
+  select.value = state.settings.model;
+  return select;
+}
 
 // ---------- navigation ----------
 
@@ -89,10 +101,10 @@ function onboardingView() {
     }
   } });
 
-  const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: getApiKey() ? "A key is saved on this device" : "sk-ant-…",
+  const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: getApiKey(provider()) ? "A key is saved on this device" : keyHint(),
     // Updated in place (no re-render, no layout shift) so a tap on another control right after typing is not lost.
-    onchange: (e) => { const v = e.target.value.trim(); if (v) { setApiKey(v); keyStatus.textContent = "Key saved on this device."; } } });
-  const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey() ? "Key saved on this device." : "No key saved yet.");
+    onchange: (e) => { const v = e.target.value.trim(); if (v) { setApiKey(v, provider()); keyStatus.textContent = "Key saved on this device."; } } });
+  const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey(provider()) ? "Key saved on this device." : "No key saved yet.");
 
   const pctLabel = h("span", {}, newPctText(s.maxNewPct));
   const wordsLabel = h("span", {}, newPctText(s.maxNewWordsPct));
@@ -111,8 +123,10 @@ function onboardingView() {
       file),
 
     h("section", { class: "card" },
-      h("h2", {}, "2. Add your Anthropic API key"),
-      h("p", { class: "muted small" }, "Claude writes the sentences and grades your answers using your own key. It is stored only in this browser and sent only to Anthropic."),
+      h("h2", {}, "2. Choose a model and add your API key"),
+      h("p", { class: "muted small" }, "An AI model writes the sentences and grades your answers, using your own Anthropic or OpenAI key. The key is stored only in this browser and sent only to that provider."),
+      h("div", { class: "field" }, modelPicker("ob-model", (e) => { s.model = e.target.value; save(); render(); })),
+      h("label", { for: "ob-key" }, `${providerName()} API key`),
       h("div", { class: "field" }, keyInput, keyStatus)),
 
     h("section", { class: "card" },
@@ -192,7 +206,7 @@ function setupView() {
   return h("section", { class: "card" },
     h("h1", {}, "Sentence practice"),
     h("p", { class: "lede" }, "Read an English sentence, write it in Chinese, and get feedback on your answer."),
-    !getApiKey() && h("div", { class: "notice" }, "Add your Anthropic API key to generate and grade sentences. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
+    !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key to generate and grade sentences. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     !state.hanly && h("div", { class: "notice" }, "No Hanly progress imported yet, so the app does not know which characters you know. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Import it in Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
     h("div", { class: "stats" },
@@ -220,7 +234,7 @@ function setupView() {
     h("div", { class: "field" },
       h("label", { for: "grammar" }, "Grammar pattern"),
       grammarSelect),
-    h("button", { class: "btn primary wide", type: "button", disabled: !getApiKey(), onclick: startSession }, "Start session"));
+    h("button", { class: "btn primary wide", type: "button", disabled: !getApiKey(provider()), onclick: startSession }, "Start session"));
 }
 
 const newPctText = (pct) => (pct === 0 ? "none" : pct >= 100 ? "no limit" : `up to ${pct}%`);
@@ -535,26 +549,26 @@ function settingsView() {
   const set = (key, value) => { s[key] = value; save(); flash = null; render(); };
 
   // --- API key
-  const keyInput = h("input", { type: "password", id: "apikey", autocomplete: "off", placeholder: getApiKey() ? "A key is saved on this device" : "sk-ant-…" });
-  const modelSelect = h("select", { id: "model", onchange: (e) => set("model", e.target.value) }, MODELS.map((m) => h("option", { value: m.id }, m.label)));
-  modelSelect.value = s.model;
+  const keyInput = h("input", { type: "password", id: "apikey", autocomplete: "off", placeholder: getApiKey(provider()) ? "A key is saved on this device" : keyHint() });
   const apiCard = h("section", { class: "card" },
-    h("h2", {}, "Claude API"),
+    h("h2", {}, "AI model"),
     flashFor("api"),
     h("div", { class: "field" },
-      h("label", { for: "apikey" }, "Anthropic API key"),
+      h("label", { for: "model" }, "Model"),
+      modelPicker("model", (e) => set("model", e.target.value)),
+      h("div", { class: "hint" }, "Used to write sentences, grade answers and answer follow-ups. Prices are each provider's list price per million input / output tokens as of November 2026, charged to your own account; check the provider's pricing page for current figures.")),
+    h("div", { class: "field" },
+      h("label", { for: "apikey" }, `${providerName()} API key`),
       keyInput,
-      h("div", { class: "hint" }, "Stored only in this browser on this device and sent only to Anthropic. It is not included in backups. Anyone who can open this browser's data on your unlocked device could read it.")),
+      h("div", { class: "hint" }, `Needed for the model selected above. Stored only in this browser on this device and sent only to ${providerName()}. It is not included in backups. Anyone who can open this browser's data on your unlocked device could read it.`)),
     h("div", { class: "row" },
       h("button", { class: "btn primary", type: "button", onclick: () => {
         const value = keyInput.value.trim();
         if (!value) return note("api", "error", "Paste a key first.");
-        setApiKey(value);
-        note("api", "ok", "Key saved on this device.");
+        setApiKey(value, provider());
+        note("api", "ok", `${providerName()} key saved on this device.`);
       } }, "Save key"),
-      getApiKey() && h("button", { class: "btn danger", type: "button", onclick: () => { setApiKey(""); note("api", "ok", "Key removed from this device."); } }, "Remove key")),
-    h("div", { class: "field" }, h("h3", {}, "Model"), modelSelect,
-      h("div", { class: "hint" }, "Used to write sentences, grade answers and answer follow-ups. Stronger models cost more per sentence on your Anthropic account.")));
+      getApiKey(provider()) && h("button", { class: "btn danger", type: "button", onclick: () => { setApiKey("", provider()); note("api", "ok", `${providerName()} key removed from this device.`); } }, "Remove key")));
 
   // --- Hanly
   const cutoffLabel = h("span", {}, `${Math.round(s.cutoff * 100)}%`);
@@ -641,7 +655,7 @@ function settingsView() {
     h("p", { class: "small muted" }, "Progress is kept only on this device. To use the app on another device, download a backup here and restore it there. Add the app to your Home Screen on iPad so Safari keeps its data."),
     h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: downloadBackup }, "Download backup")),
     h("div", { class: "field" }, h("label", { for: "restore" }, "Restore from a backup"), restore,
-      h("div", { class: "hint" }, "Replaces everything in the app on this device except the API key.")),
+      h("div", { class: "hint" }, "Replaces everything in the app on this device except API keys.")),
     h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: () => { state.onboarded = false; save(); P = { phase: "setup" }; go("practice"); } }, "Run first-time setup again")),
     h("div", { class: "row" },
       h("button", { class: "btn danger", type: "button", onclick: () => {
@@ -651,7 +665,7 @@ function settingsView() {
         note("backup", "ok", "History deleted.");
       } }, "Delete history"),
       h("button", { class: "btn danger", type: "button", onclick: () => {
-        if (!confirm("Delete everything in the app on this device, including the Hanly import, history and reviews? The API key is kept.")) return;
+        if (!confirm("Delete everything in the app on this device, including the Hanly import, history and reviews? API keys are kept.")) return;
         resetAll();
         P = { phase: "setup" };
         note("backup", "ok", "Everything was deleted.");
