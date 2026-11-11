@@ -16,6 +16,7 @@ export const DEFAULTS = {
     sessionLength: 10,
     grammar: "", // pattern text, "" = any
   },
+  onboarded: false, // first-run setup finished or skipped
   hanly: null, // { importedAt, fileName, entries: { key: progressPercent } }
   extraKnown: "", // characters the user marked as known in this app
   reviews: [], // low-scoring sentences scheduled to come back
@@ -79,6 +80,7 @@ export function importData(text) {
   const d = parsed.data;
   Object.assign(state, structuredClone(DEFAULTS), d, {
     settings: { ...DEFAULTS.settings, ...(d.settings || {}) },
+    onboarded: true,
   });
   save();
 }
