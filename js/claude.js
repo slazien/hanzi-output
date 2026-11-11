@@ -8,16 +8,14 @@ import { askOpenAI } from "./openai.js";
 
 // Prices are list prices in US dollars per million input / output tokens,
 // checked in November 2026. They are shown for comparison only.
-export const PROVIDERS = { anthropic: "Anthropic", openai: "OpenAI" };
+export const PROVIDERS = { openai: "OpenAI", anthropic: "Anthropic" };
 export const MODELS = [
-  { id: "claude-opus-5-5", provider: "anthropic", label: "Claude Opus 5.5", price: "$4 / $20" },
-  { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", price: "$2 / $10" },
-  { id: "claude-haiku-5-5", provider: "anthropic", label: "Claude Haiku 5.5", price: "$0.10 / $0.50" },
-  { id: "gpt-6-astra", provider: "openai", label: "GPT-6 Astra", price: "$10 / $50" },
-  { id: "gpt-6.1-sol", provider: "openai", label: "GPT-6.1 Sol", price: "$2 / $10" },
-  { id: "gpt-6.1-terra", provider: "openai", label: "GPT-6.1 Terra", price: "$1 / $5" },
   { id: "gpt-6-luna", provider: "openai", label: "GPT-6 Luna", price: "$0.10 / $0.50" },
+  { id: "gpt-6.1-terra", provider: "openai", label: "GPT-6.1 Terra", price: "$1 / $5" },
+  { id: "claude-haiku-5-5", provider: "anthropic", label: "Claude Haiku 5.5", price: "$0.10 / $0.50" },
+  { id: "claude-sonnet-5-5", provider: "anthropic", label: "Claude Sonnet 5.5", price: "$2 / $10" },
 ];
+export const DEFAULT_MODEL = MODELS[0].id; // the cheapest
 export const providerOf = (model) => MODELS.find((m) => m.id === model)?.provider || "anthropic";
 
 export class ClaudeError extends Error {}
