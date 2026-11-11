@@ -461,6 +461,40 @@ ul.points li { margin-bottom: 4px; }
 .cal-day.l3 { background: color-mix(in srgb, var(--ink) 70%, var(--soft)); }
 .cal-day.l4 { background: var(--ink); }
 
+/* Line chart */
+.chart { display: block; width: 100%; height: auto; max-width: 720px; margin-top: 4px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font: 12px var(--ui); }
+.chart .line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .dot { fill: var(--ink); stroke: var(--card); stroke-width: 2; }
+.chart .dot.hollow { fill: var(--card); stroke: var(--ink); }
+.chart .value { fill: var(--ink); font: 600 14px var(--ui); }
+.chart .hit { fill: transparent; cursor: pointer; outline: none; }
+.chart .hit:focus-visible { stroke: var(--ink); stroke-width: 1.5; }
+.chart-tip { color: var(--muted); font-size: 0.9rem; min-height: 1.5em; margin-top: 4px; }
+
+/* Strength rows: name, bar against the overall-average marker, score, count */
+.s-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 2px 0 4px; }
+.s-legend .key { position: static; display: inline-block; height: 12px; vertical-align: -2px; margin-right: 4px; }
+.strength { display: grid; gap: 10px; margin-top: 4px; }
+.s-row { display: grid; grid-template-columns: minmax(120px, 30%) 1fr 2.6em 2.6em; align-items: center; gap: 12px; }
+.s-name { overflow-wrap: anywhere; line-height: 1.3; }
+.s-name.hanzi { font-size: 1.15rem; }
+.s-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font: 600 0.72rem var(--ui); vertical-align: 1px; }
+.s-badge.weak { background: var(--warn-soft); color: var(--warn); }
+.s-badge.strong { background: var(--good-soft); color: var(--good); }
+.s-track { position: relative; height: 14px; background: var(--soft); border-radius: 0 4px 4px 0; }
+.s-fill { display: block; height: 100%; background: var(--muted); border-radius: 0 4px 4px 0; }
+.s-fill.weak { background: var(--warn); }
+.s-fill.strong { background: var(--good); }
+.s-avg { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+.s-score { text-align: right; font-weight: 650; font-variant-numeric: tabular-nums; }
+.s-n { text-align: right; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .s-row { grid-template-columns: 1fr 2.6em 2.6em; row-gap: 4px; }
+  .s-name { grid-column: 1 / -1; }
+}
+
 /* ---------- settings ---------- */
 
 .count-line { font-size: 1.05rem; }

@@ -9,7 +9,7 @@ import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CAT
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 
 const main = document.getElementById("main");
 
@@ -825,11 +825,70 @@ function barChart(items, { max, label, title }) {
     }));
 }
 
-function breakdownTable(rows, name, format = (k) => k) {
-  if (!rows.length) return h("p", { class: "muted small" }, `Not enough practice yet to compare by ${name}. A row appears once it has at least 5 sentences in the last 60 days.`);
-  return h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, h("th", {}, name[0].toUpperCase() + name.slice(1)), h("th", {}, "Sentences"), h("th", {}, "Average score"), h("th", {}, "Missed"))),
-    h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, format(r.key)), h("td", {}, r.n), h("td", {}, r.score == null ? "–" : Math.round(r.score)), h("td", {}, pct(r.missRate))))));
+// SVG elements need their own namespace.
+function svg(tag, attrs, ...children) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null && v !== false) el.setAttribute(k, v);
+  for (const child of children.flat(Infinity)) if (child != null && child !== false) el.append(child.nodeType ? child : document.createTextNode(String(child)));
+  return el;
+}
+
+// Average score per week as one line. Weeks with no practice leave a gap;
+// weeks with fewer than five sentences are drawn hollow, as they move a lot by chance.
+function scoreLine(weeks) {
+  const W = 640, H = 230, left = 34, right = 40, top = 16, bottom = 30;
+  const have = weeks.filter((w) => w.score != null);
+  if (!have.length) return h("p", { class: "muted small" }, "No graded sentences in the last eight weeks yet.");
+  const lo = Math.max(0, Math.floor((Math.min(...have.map((w) => w.score)) - 8) / 10) * 10);
+  const x = (i) => left + (i * (W - left - right)) / (weeks.length - 1);
+  const y = (v) => top + ((100 - v) * (H - top - bottom)) / (100 - lo);
+  const ticks = [];
+  for (let v = lo; v <= 100; v += lo >= 60 ? 10 : 20) ticks.push(v);
+
+  // One path per unbroken run of weeks.
+  const runs = [];
+  let run = [];
+  weeks.forEach((w, i) => {
+    if (w.score == null) { if (run.length) runs.push(run); run = []; }
+    else run.push([x(i), y(w.score)]);
+  });
+  if (run.length) runs.push(run);
+
+  const tip = h("div", { class: "chart-tip", role: "status" }, "Tap a point for that week's details.");
+  const date = (t) => new Date(t).toLocaleDateString([], { month: "short", day: "numeric" });
+  const show = (w) => { tip.textContent = `Week ending ${date(w.end)}: average ${Math.round(w.score)} over ${w.n} ${w.n === 1 ? "sentence" : "sentences"}${w.n < 5 ? " (too few to read much into)" : ""}.`; };
+  const lastIdx = weeks.map((w) => w.score != null).lastIndexOf(true);
+
+  const chart = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": `Average score by week: ${have.map((w) => `${date(w.end)} ${Math.round(w.score)}`).join(", ")}` },
+    ticks.map((v) => [svg("line", { class: "grid", x1: left, x2: W - right, y1: y(v), y2: y(v) }), svg("text", { class: "axis", x: left - 8, y: y(v) + 4, "text-anchor": "end" }, v)]),
+    weeks.map((w, i) => (i % 2 === (weeks.length - 1) % 2 ? svg("text", { class: "axis", x: x(i), y: H - 8, "text-anchor": "middle" }, date(w.end)) : null)),
+    runs.map((pts) => svg("path", { class: "line", d: pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ") })),
+    weeks.map((w, i) => (w.score == null ? null : [
+      svg("circle", { class: w.n < 5 ? "dot hollow" : "dot", cx: x(i), cy: y(w.score), r: 5 }),
+      i === lastIdx ? svg("text", { class: "value", x: x(i) + 10, y: y(w.score) + 5 }, Math.round(w.score)) : null,
+      (() => { const hit = svg("circle", { class: "hit", cx: x(i), cy: y(w.score), r: 20, tabindex: 0 }); hit.addEventListener("pointerenter", () => show(w)); hit.addEventListener("click", () => show(w)); hit.addEventListener("focus", () => show(w)); return hit; })(),
+    ])));
+  return h("div", {}, chart, tip);
+}
+
+// One row per area: a bar for its average score against a marker for your
+// overall average, weakest first, so the eye lands on what needs work.
+function strengthRows(rows, overall, format = (k) => k, hanzi = false) {
+  if (!rows.length) return h("p", { class: "muted small" }, "Not enough practice here yet. An entry appears once it has 5 sentences in the last 60 days.");
+  const sorted = rows.filter((r) => r.score != null).sort((a, b) => a.score - b.score);
+  return h("div", { class: "strength" }, sorted.map((r) => {
+    const diff = r.score - overall;
+    const kind = r.n >= 8 && diff <= -8 ? "weak" : r.n >= 8 && diff >= 8 ? "strong" : "";
+    const fill = h("i", { class: `s-fill ${kind}` });
+    fill.style.width = `${Math.max(2, r.score)}%`;
+    const mark = h("i", { class: "s-avg" });
+    mark.style.left = `${overall}%`;
+    return h("div", { class: "s-row", title: `${format(r.key)}: average ${Math.round(r.score)} over ${r.n} sentences, ${pct(r.missRate)} missed` },
+      h("div", { class: `s-name${hanzi ? " hanzi" : ""}` }, format(r.key), kind && h("span", { class: `s-badge ${kind}` }, kind === "weak" ? "Weak" : "Strong")),
+      h("div", { class: "s-track" }, fill, mark),
+      h("div", { class: "s-score" }, Math.round(r.score)),
+      h("div", { class: "s-n muted" }, `${r.n}`));
+  }));
 }
 
 function progressView() {
@@ -864,17 +923,30 @@ function progressView() {
         h("div", { class: "stat" }, h("b", {}, week), h("span", {}, "sentences in the last 7 days")),
         h("div", { class: "stat" }, h("b", {}, state.reviews.length), h("span", {}, `in review, ${fc[0]} due today`))),
       h("h3", {}, "Average score by week"),
-      barChart(weeks.map((w) => ({ value: w.score, n: w.n, caption: new Date(w.end).toLocaleDateString([], { month: "short", day: "numeric" }) })), { max: 100, title: "Average score for each of the last eight weeks", label: (it) => `${Math.round(it.value)}` }),
-      h("p", { class: "muted small" }, "Each bar is the week ending on that date. Weeks with few sentences move a lot by chance: ", weeks.map((w) => w.n).join(", "), " sentences per week.")),
+      scoreLine(weeks)),
 
-    h("section", { class: "card" },
-      h("h2", {}, "Where you are strong and weak"),
-      h("p", { class: "muted small" }, "Last 60 days. “Missed” counts Forgot and shown answers fully, and Hard or a score under 60 as half."),
-      h("h3", {}, "By HSK level"), breakdownTable(breakdown(log, "h").sort((a, b) => a.key - b.key), "level", (k) => (k === 7 ? "HSK 7-9" : `HSK ${k}`)),
-      h("h3", {}, "By theme"), breakdownTable(breakdown(log, "th"), "theme"),
-      h("h3", {}, "By grammar pattern"), breakdownTable(breakdown(log, "g"), "pattern"),
-      h("h3", {}, "Mistake types"),
-      mistakeTable(log)),
+    (() => {
+      const graded = log.filter((e) => e.sc != null && now - e.t <= 60 * 86400000);
+      const overall = graded.length ? graded.reduce((sum, e) => sum + e.sc, 0) / graded.length : 0;
+      const themes = breakdown(log, "th");
+      const scored = themes.filter((r) => r.score != null).sort((a, b) => a.score - b.score);
+      const headline = scored.length >= 2
+        ? ["Weakest theme: ", h("b", {}, scored[0].key), ` (${Math.round(scored[0].score)}). Strongest: `, h("b", {}, scored[scored.length - 1].key), ` (${Math.round(scored[scored.length - 1].score)}).`]
+        : "Bars show your average score in each area over the last 60 days.";
+      return h("section", { class: "card" },
+        h("h2", {}, "Where you are strong and weak"),
+        h("p", {}, headline),
+        h("div", { class: "s-legend muted small" },
+          h("span", {}, h("i", { class: "s-avg key" }), ` your overall average (${Math.round(overall)})`),
+          h("span", {}, "bar = average score, 0 to 100"),
+          h("span", {}, "right-hand number = sentences")),
+        h("h3", {}, "Themes"), strengthRows(themes, overall),
+        h("h3", {}, "Grammar patterns"), strengthRows(breakdown(log, "g"), overall, (k) => k, true),
+        h("h3", {}, "HSK levels"), strengthRows(breakdown(log, "h"), overall, (k) => (k === 7 ? "HSK 7-9" : `HSK ${k}`)),
+        h("h3", {}, "Most common mistakes"),
+        h("p", { class: "muted small" }, "How often each kind of mistake appeared, with its share of graded answers."),
+        mistakeBars(log));
+    })(),
 
     h("section", { class: "card" },
       h("h2", {}, "Coming up and recent days"),
@@ -897,16 +969,23 @@ function progressView() {
   ];
 }
 
-function mistakeTable(log) {
+function mistakeBars(log) {
   const now = Date.now();
   const recent = log.filter((e) => e.sc != null && now - e.t <= 60 * 86400000);
   const counts = new Map();
   recent.forEach((e) => (e.c || []).forEach((c) => counts.set(c, (counts.get(c) || 0) + 1)));
   const rows = [...counts.entries()].filter(([c]) => CATEGORIES[c]).sort((a, b) => b[1] - a[1]);
   if (!rows.length) return h("p", { class: "muted small" }, "No labelled mistakes yet. Each mistake the grader finds is given a type from now on.");
-  return h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, h("th", {}, "Type"), h("th", {}, "Times"), h("th", {}, "Share of graded answers"))),
-    h("tbody", {}, rows.map(([c, n]) => h("tr", {}, h("td", {}, CATEGORIES[c]), h("td", {}, n), h("td", {}, pct(n / recent.length))))));
+  const max = rows[0][1];
+  return h("div", { class: "strength" }, rows.map(([c, n]) => {
+    const fill = h("i", { class: "s-fill" });
+    fill.style.width = `${Math.max(2, (n / max) * 100)}%`;
+    return h("div", { class: "s-row", title: `${CATEGORIES[c]}: ${n} times, in ${pct(n / recent.length)} of graded answers` },
+      h("div", { class: "s-name" }, CATEGORIES[c]),
+      h("div", { class: "s-track" }, fill),
+      h("div", { class: "s-score" }, n),
+      h("div", { class: "s-n muted" }, pct(n / recent.length)));
+  }));
 }
 
 // ---------- settings ----------
