@@ -4,7 +4,9 @@
 
 import Anthropic from "../vendor/anthropic-sdk.js";
 import { getApiKey, cleanApiKey } from "./store.js";
-import { askOpenAI } from "./openai.js";
+import { askOpenAI, OPENAI_MODULE_VERSION } from "./openai.js";
+
+export const MODULE_VERSION = OPENAI_MODULE_VERSION ?? 0;
 
 // Prices are list prices in US dollars per million input / output tokens,
 // checked in November 2026. They are shown for comparison only.

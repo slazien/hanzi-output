@@ -1,13 +1,13 @@
 import { state, save, getApiKey, setApiKey, cleanApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
-import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection } from "./claude.js";
+import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection, MODULE_VERSION } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, creditOf } from "./bank.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 
 const main = document.getElementById("main");
 
@@ -952,7 +952,9 @@ function settingsView() {
       h("li", {}, "Word meanings: ", h("a", { href: "https://www.mdbg.net/chinese/dictionary?page=cc-cedict", target: "_blank", rel: "noopener" }, "CC-CEDICT"), " — CC BY-SA 4.0"),
       h("li", {}, "HSK levels: ", h("a", { href: "https://github.com/drkameleon/complete-hsk-vocabulary", target: "_blank", rel: "noopener" }, "complete-hsk-vocabulary"), " by Yanis Zafirópulos — MIT")),
     h("p", { class: "small muted" }, "Chinese Grammar Wiki sentences are licensed for non-commercial use only. Pinyin and word splitting for Tatoeba sentences are added automatically and can contain mistakes."),
-    h("p", { class: "small muted", id: "version" }, `App version ${APP_VERSION}.`));
+    h("p", { class: "small muted", id: "version" }, MODULE_VERSION === APP_VERSION
+      ? `App version ${APP_VERSION}.`
+      : `App version ${APP_VERSION}, but an older part (${MODULE_VERSION}) is still loaded. Reload the page.`));
   return [apiCard, hanlyCard, hskCard, dataCard, dangerCard, about];
 }
 

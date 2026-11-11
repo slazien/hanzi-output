@@ -1,6 +1,6 @@
 // Caches the app's own files so the screens open offline. Requests to the
 // Anthropic and OpenAI APIs are never cached or intercepted.
-const CACHE = "juzi-v13";
+const CACHE = "juzi-v14";
 const SHELL = [
   "./", "index.html", "css/styles.css", "manifest.webmanifest",
   "js/app.js", "js/store.js", "js/known.js", "js/claude.js", "js/openai.js", "js/session.js",
@@ -9,7 +9,10 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // "reload" skips the browser's own short-lived copy, which can be up to ten
+  // minutes old on this host and would put a stale file into the new cache.
+  const fresh = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
