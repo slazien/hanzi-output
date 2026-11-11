@@ -12,6 +12,8 @@ All of this can be done in a browser. Menu names in the Supabase and Google cons
 
 ## 2. Email sign-in
 
+Email sign-in is switched off in the app (`EMAIL_SIGN_IN` in `js/config.js`) until a mail service is connected, because the built-in sender below only reaches the project's own team.
+
 Nothing to set up for the project owner. Supabase's default email contains a sign-in link, which the app accepts. The link must be opened in the browser where the app is used; if the mail app opens another browser, copy the link and paste it into the right one.
 
 Supabase's built-in sender is limited (a couple of messages an hour, and only to addresses that belong to the project's team). For other people, add an email service under **Authentication → Emails → SMTP Settings**. With custom SMTP the email template can also be edited to include a 6-digit code (`{{ .Token }}`), which the app accepts too.

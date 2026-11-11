@@ -4,12 +4,12 @@ import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, te
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
-import { accountsEnabled, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow } from "./sync.js";
+import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow } from "./sync.js";
 import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 
 const main = document.getElementById("main");
 
@@ -1041,24 +1041,27 @@ function accountCard() {
     flashFor("account"),
     h("p", { class: "small muted" }, "Optional. Sign in to keep your progress safe and in step across devices. What is on this device now is combined with your account, not replaced."),
     syncStatus.google && h("div", { class: "field" }, h("button", { class: "btn wide", type: "button", id: "acct-google", disabled: account.busy, onclick: () => run(signInWithGoogle, "") }, "Continue with Google")),
-    h("div", { class: "field" },
-      h("label", { for: "acct-email" }, syncStatus.google ? "Or sign in by email" : "Sign in by email"),
-      email,
-      h("div", { class: "hint" }, "We email you a sign-in link. No password.")),
-    !account.codeSent
-      ? h("button", { class: "btn", type: "button", id: "acct-send", disabled: account.busy, onclick: () => {
-          if (!/^\S+@\S+\.\S+$/.test(account.email)) return note("account", "error", "Enter your email address first.");
-          run(async () => { await sendEmailCode(account.email); account.codeSent = true; }, `Email sent to ${account.email}. It can take a minute to arrive.`);
-        } }, "Email me a sign-in link")
-      : [h("p", {}, "Open the link in the email ", h("b", {}, "in this browser"), ". If your mail app opens a different browser, press and hold the link, copy it, and paste it into this browser's address bar."),
-        h("div", { class: "field" }, h("label", { for: "acct-code" }, "Or, if the email shows a 6-digit code, enter it here"), code),
-        h("div", { class: "row" },
-          h("button", { class: "btn primary", type: "button", id: "acct-verify", disabled: account.busy, onclick: () => {
-            const token = code.value.replace(/\D/g, "");
-            if (token.length < 6) return note("account", "error", "Enter the 6-digit code from the email.");
-            run(async () => { await verifyEmailCode(account.email, token); account.codeSent = false; }, "");
-          } }, "Sign in with code"),
-          h("button", { class: "btn quiet", type: "button", onclick: () => { account.codeSent = false; flash = null; render(); } }, "Use a different email"))]);
+    !syncStatus.google && !emailSignIn && h("p", { class: "muted small" }, "Checking which sign-in options are available…"),
+    emailSignIn && [
+      h("div", { class: "field" },
+        h("label", { for: "acct-email" }, syncStatus.google ? "Or sign in by email" : "Sign in by email"),
+        email,
+        h("div", { class: "hint" }, "We email you a sign-in link. No password.")),
+      !account.codeSent
+        ? h("button", { class: "btn", type: "button", id: "acct-send", disabled: account.busy, onclick: () => {
+            if (!/^\S+@\S+\.\S+$/.test(account.email)) return note("account", "error", "Enter your email address first.");
+            run(async () => { await sendEmailCode(account.email); account.codeSent = true; }, `Email sent to ${account.email}. It can take a minute to arrive.`);
+          } }, "Email me a sign-in link")
+        : [h("p", {}, "Open the link in the email ", h("b", {}, "in this browser"), ". If your mail app opens a different browser, press and hold the link, copy it, and paste it into this browser's address bar."),
+          h("div", { class: "field" }, h("label", { for: "acct-code" }, "Or, if the email shows a 6-digit code, enter it here"), code),
+          h("div", { class: "row" },
+            h("button", { class: "btn primary", type: "button", id: "acct-verify", disabled: account.busy, onclick: () => {
+              const token = code.value.replace(/\D/g, "");
+              if (token.length < 6) return note("account", "error", "Enter the 6-digit code from the email.");
+              run(async () => { await verifyEmailCode(account.email, token); account.codeSent = false; }, "");
+            } }, "Sign in with code"),
+            h("button", { class: "btn quiet", type: "button", onclick: () => { account.codeSent = false; flash = null; render(); } }, "Use a different email"))],
+    ]);
 }
 
 function settingsView() {
