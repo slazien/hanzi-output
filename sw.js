@@ -1,6 +1,6 @@
 // Caches the app's own files so the screens open offline. Requests to the
 // Anthropic and OpenAI APIs are never cached or intercepted.
-const CACHE = "juzi-v12";
+const CACHE = "juzi-v13";
 const SHELL = [
   "./", "index.html", "css/styles.css", "manifest.webmanifest",
   "js/app.js", "js/store.js", "js/known.js", "js/claude.js", "js/openai.js", "js/session.js",
@@ -18,20 +18,31 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Serve from cache straight away and refresh the cached copy in the background.
+// Online, always load the current files, so every part of the app is the same
+// version; the cached copies are only used when there is no connection. The
+// large files that rarely change (sentence bank, bundled SDK) are served from
+// the cache first, and are refreshed whenever the cache version changes.
+const CACHE_FIRST = /\/(data\/bank\.json|vendor\/)/;
+
+async function fromNetwork(request, cache) {
+  const response = await fetch(request.url, { cache: "no-cache" });
+  if (response.ok) cache.put(request, response.clone());
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(event.request, { ignoreSearch: true });
-      const fresh = fetch(event.request)
-        .then((response) => {
-          if (response.ok) cache.put(event.request, response.clone());
-          return response;
-        })
-        .catch(() => cached);
-      return cached || fresh;
+      if (cached && CACHE_FIRST.test(url.pathname)) return cached;
+      try {
+        return await fromNetwork(event.request, cache);
+      } catch (error) {
+        if (cached) return cached;
+        throw error;
+      }
     })
   );
 });
