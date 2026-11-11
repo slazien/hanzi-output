@@ -79,6 +79,18 @@ export function buildKnown(state) {
       added++;
     }
   }
+  // A starting HSK level: every character first taught up to that level counts as known.
+  let fromLevel = 0;
+  const level = Number(s.baseLevel) || 0;
+  if (level) {
+    const lists = HSK_CHARS[s.hskScheme] || HSK_CHARS.new;
+    for (const c of lists.slice(0, level).join("")) {
+      if (!chars.has(c)) {
+        chars.add(c);
+        fromLevel++;
+      }
+    }
+  }
   const wordSet = new Set(fromHanly.wordSet);
   const words = [...fromHanly.words];
   for (const w of state.extraWords || []) {
@@ -87,7 +99,9 @@ export function buildKnown(state) {
       if ([...w].length > 1) words.push(w);
     }
   }
-  return { chars, words, wordSet, hanlyCount: fromHanly.chars.size, added, items: fromHanly.items, components: fromHanly.components };
+  // With a starting level there is no list of studied words, so a word made
+  // entirely of known characters counts as known.
+  return { chars, words, wordSet, hanlyCount: fromHanly.chars.size, added, fromLevel, loose: Boolean(level), items: fromHanly.items, components: fromHanly.components };
 }
 
 // Characters allowed as "new" under the HSK cap (0 = no cap).
@@ -124,7 +138,8 @@ export function measure(chinese, known, allowedNew) {
 export function isKnownWord(text, known) {
   const han = hanChars(text).join("");
   if (!han) return true;
-  return known.wordSet.has(han) || (han.length === 1 && known.chars.has(han));
+  if (known.wordSet.has(han) || (han.length === 1 && known.chars.has(han))) return true;
+  return Boolean(known.loose) && [...han].every((c) => known.chars.has(c));
 }
 
 // Share of new words = words not known / all words in the sentence

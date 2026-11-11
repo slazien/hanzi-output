@@ -9,7 +9,7 @@ import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CAT
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 21;
+const APP_VERSION = 22;
 
 const main = document.getElementById("main");
 
@@ -62,6 +62,14 @@ function filePicker(id, label, onFile) {
     onFile(f);
   } });
   return h("div", { class: "file" }, h("label", { class: "btn", for: id }, label), input, name);
+}
+
+// "I already know roughly HSK level N": marks that level's characters as known.
+function levelPicker(onPick) {
+  const s = state.settings;
+  return h("div", { class: "segmented", role: "group", "aria-label": "Level you already know" },
+    [[0, "None"], [1, "HSK 1"], [2, "HSK 2"], [3, "HSK 3"], [4, "HSK 4"], [5, "HSK 5"], [6, "HSK 6"]].map(([n, label]) =>
+      h("button", { type: "button", "aria-pressed": String((s.baseLevel || 0) === n), onclick: () => { s.baseLevel = n; save(); onPick(); } }, label)));
 }
 
 // ---------- navigation ----------
@@ -147,11 +155,18 @@ function onboardingView() {
       h("p", { class: "lede tight" }, "Four quick choices so sentences match what you already know. Everything here can be changed later in Settings.")),
 
     h("section", { class: "card" },
-      h("h2", {}, "1. Bring in your Hanly progress"),
-      h("p", { class: "muted small" }, "Choose the learning progress export (.json) from Hanly. Characters you have learned there become the characters sentences are built from. The file stays on this device."),
-      flashFor("ob-hanly"),
-      state.hanly && !flashFor("ob-hanly") ? h("div", { class: "notice ok" }, `${state.hanly.fileName} is imported. ${known.hanlyCount} characters count as known.`) : null,
-      file),
+      h("h2", {}, "1. What do you already know?"),
+      h("p", { class: "muted small" }, "Sentences are built from the characters you know. Pick the level you have roughly finished, import your progress from the Hanly app, or both."),
+      h("div", { class: "field" },
+        h("div", { class: "label" }, "I already know the characters up to"),
+        levelPicker(() => render()),
+        h("div", { class: "hint" }, state.settings.baseLevel ? `${known.fromLevel.toLocaleString()} characters from ${state.settings.hskScheme === "old" ? "HSK 2.0" : "HSK 3.0"} levels 1${state.settings.baseLevel > 1 ? `-${state.settings.baseLevel}` : ""} count as known.` : "Choose None if you are starting from scratch or only want to use a Hanly file.")),
+      h("div", { class: "field" },
+        h("div", { class: "label" }, "Hanly progress file (optional)"),
+        h("p", { class: "muted small" }, "The learning progress export (.json) from Hanly. The file stays on this device unless you sign in to sync."),
+        flashFor("ob-hanly"),
+        state.hanly && !flashFor("ob-hanly") ? h("div", { class: "notice ok" }, `${state.hanly.fileName} is imported. ${known.hanlyCount} characters count as known.`) : null,
+        file)),
 
     h("section", { class: "card" },
       h("h2", {}, "2. Choose a model and add your API key"),
@@ -161,7 +176,7 @@ function onboardingView() {
       h("div", { class: "field" }, keyInput, keyStatus)),
 
     h("section", { class: "card" },
-      h("h2", {}, "3. Which HSK level are you studying?"),
+      h("h2", {}, "3. Which HSK level are you studying now?"),
       h("p", { class: "muted small" }, "New characters and grammar in your sentences will come from this level and below."),
       h("div", { class: "segmented", role: "group" },
         levels.map((n) => h("button", { type: "button", "aria-pressed": String(s.hskCap === n), onclick: () => { s.hskCap = n; save(); render(); } }, `HSK ${n}`)))),
@@ -254,7 +269,7 @@ function setupView() {
     h("h1", {}, "Sentence practice"),
     h("p", { class: "lede" }, `${due} due for review · ${known.chars.size} characters known`),
     !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key so your answers can be graded. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
-    !state.hanly && h("div", { class: "notice" }, "No Hanly progress imported yet, so the app does not know which characters you know. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Import it in Settings")),
+    !known.chars.size && h("div", { class: "notice" }, "The app does not know which characters you know yet. Choose your level or import a Hanly file. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
     h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()) || fit === 0, onclick: () => startSession() }, `Start · ${s.sessionLength} sentences`),
     h("p", { class: `small fit-line ${fit === 0 ? "warn" : "muted"}`, role: "status" }, fitText),
@@ -1123,8 +1138,12 @@ function settingsView() {
   const hanlyCard = h("section", { class: "card" },
     h("h2", {}, "Characters and words you know"),
     flashFor("hanly"),
-    h("p", { class: "count-line" }, h("b", {}, known.chars.size), " characters and ", h("b", {}, known.wordSet.size), " words known",
-      h("span", { class: "muted" }, ` · ${known.hanlyCount} characters from Hanly, ${known.added} added here`)),
+    h("p", { class: "count-line" }, h("b", {}, known.chars.size), " characters and ", h("b", {}, known.loose ? "all words made from them" : known.wordSet.size), known.loose ? " count as known" : " words known",
+      h("span", { class: "muted" }, ` · ${known.hanlyCount} characters from Hanly, ${known.fromLevel} from your starting level, ${known.added} added here`)),
+    h("div", { class: "field" },
+      h("h3", {}, "Starting level"),
+      levelPicker(() => { flash = null; render(); }),
+      h("div", { class: "hint" }, "Characters first taught up to this HSK level count as known, and so does any word made only of known characters. Use None if you rely on a Hanly file alone.")),
     h("div", { class: "field" },
       h("h3", {}, "Hanly progress file"),
       state.hanly

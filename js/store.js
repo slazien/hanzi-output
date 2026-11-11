@@ -8,6 +8,7 @@ const HISTORY_LIMIT = 500;
 export const DEFAULTS = {
   settings: {
     model: "gpt-6-luna", // the cheapest; see MODELS in claude.js
+    baseLevel: 0, // HSK level whose characters count as known (0 = none)
     knownRule: "reverse", // reverse | normal | both | any
     cutoff: 0.5, // Hanly progressPercent needed to count as known
     maxNewPct: 20, // maximum share of new characters in a sentence
