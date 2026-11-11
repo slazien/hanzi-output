@@ -1,5 +1,5 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
-import { parseHanly, buildKnown, isHan, hskLevelOf } from "./known.js";
+import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, gradeAnswer, followUp } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, hskLabel, PASS_SCORE } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
@@ -94,6 +94,7 @@ function onboardingView() {
   const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey() ? "Key saved on this device." : "No key saved yet.");
 
   const pctLabel = h("span", {}, newPctText(s.maxNewPct));
+  const wordsLabel = h("span", {}, newPctText(s.maxNewWordsPct));
   const levels = [1, 2, 3, 4, 5, 6];
 
   return [
@@ -120,13 +121,19 @@ function onboardingView() {
         levels.map((n) => h("button", { type: "button", "aria-pressed": String(s.hskCap === n), onclick: () => { s.hskCap = n; save(); render(); } }, `HSK ${n}`)))),
 
     h("section", { class: "card" },
-      h("h2", {}, "4. How many new characters per sentence?"),
+      h("h2", {}, "4. How much new material per sentence?"),
       h("div", { class: "field" },
         h("label", { for: "ob-maxnew" }, "New characters: ", pctLabel),
         h("input", { type: "range", id: "ob-maxnew", min: "0", max: "100", step: "5", value: String(s.maxNewPct),
           oninput: (e) => { pctLabel.textContent = newPctText(Number(e.target.value)); },
           onchange: (e) => { s.maxNewPct = Number(e.target.value); save(); } }),
-        h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know."))),
+        h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know.")),
+      h("div", { class: "field" },
+        h("label", { for: "ob-maxnewwords" }, "New words: ", wordsLabel),
+        h("input", { type: "range", id: "ob-maxnewwords", min: "0", max: "100", step: "5", value: String(s.maxNewWordsPct),
+          oninput: (e) => { wordsLabel.textContent = newPctText(Number(e.target.value)); },
+          onchange: (e) => { s.maxNewWordsPct = Number(e.target.value); save(); } }),
+        h("div", { class: "hint" }, "The largest share of a sentence's words that may be new. A word is known if you studied it in Hanly or it is a single character you know."))),
 
     h("div", { class: "row between" },
       h("button", { class: "btn quiet", type: "button", onclick: finish }, "Skip for now"),
@@ -165,6 +172,13 @@ function setupView() {
     onchange: (e) => set("maxNewPct", Number(e.target.value)),
   });
 
+  const wordsLabel = h("span", {}, newPctText(s.maxNewWordsPct));
+  const wordsSlider = h("input", {
+    type: "range", id: "maxnewwords", min: "0", max: "100", step: "5", value: String(s.maxNewWordsPct),
+    oninput: (e) => { wordsLabel.textContent = newPctText(Number(e.target.value)); },
+    onchange: (e) => set("maxNewWordsPct", Number(e.target.value)),
+  });
+
   const segmented = (key, options) =>
     h("div", { class: "segmented", role: "group" },
       options.map(([value, label]) => h("button", { type: "button", "aria-pressed": String(s[key] === value), onclick: () => set(key, value) }, label)));
@@ -186,6 +200,10 @@ function setupView() {
       h("label", { for: "maxnew" }, "New characters per sentence: ", pctLabel),
       slider,
       h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know.")),
+    h("div", { class: "field" },
+      h("label", { for: "maxnewwords" }, "New words per sentence: ", wordsLabel),
+      wordsSlider,
+      h("div", { class: "hint" }, "The largest share of a sentence's words that may be new. A word is known if you studied it in Hanly, marked it here, or it is a single character you know.")),
     h("div", { class: "field" },
       h("div", { class: "label" }, `New characters and grammar up to (${s.hskScheme === "old" ? "HSK 2.0" : "HSK 3.0"})`),
       segmented("hskCap", [[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"], [0, "No cap"]])),
@@ -230,8 +248,16 @@ function itemTags(item) {
   return h("div", { class: "tags" },
     item.reviewId && h("span", { class: "tag review" }, "Review"),
     item.grammar && h("span", { class: "tag hanzi" }, item.grammar),
-    h("span", { class: "tag" }, item.pct > 0 ? `${Math.round(item.pct)}% new characters` : "Known characters only"),
-    item.overLimit && h("span", { class: "tag review" }, "Over your new-character limit"));
+    item.hsk && h("span", { class: "tag" }, item.hsk),
+    h("span", { class: "tag" }, newShareText(item)),
+    item.overLimit && h("span", { class: "tag review" }, "Over your limit for new material"));
+}
+
+function newShareText(item) {
+  const c = Math.round(measure(item.chinese, known.chars, null).pct);
+  const w = item.words ? Math.round(measureWords(item.words, known).pct) : null;
+  if (!c && !w) return "Nothing new";
+  return w == null ? `${c}% new characters` : `${c}% new characters · ${w}% new words`;
 }
 
 function answerView() {
@@ -290,46 +316,62 @@ function finishItem(item, answer, grade) {
   window.scrollTo(0, 0);
 }
 
-// The reference sentence: tap a word for its pinyin and meaning.
+// The reference sentence, Hanly-style: pinyin above each word, words you know
+// underlined. Tap a word for its meaning.
 function referenceBlock(item, cur) {
-  const chars = (text) => [...text].map((c) => (isHan(c) && !known.chars.has(c) ? h("span", { class: "new-char" }, c) : c));
-  if (!item.words) return h("p", { class: "line-zh" }, chars(item.chinese));
+  if (!item.words) return h("p", { class: "line-zh", lang: "zh-Hans" }, item.chinese);
+  const showPinyin = state.settings.showPinyin;
 
   const panel = h("div", { class: "gloss", hidden: cur.selected < 0 });
   const fill = () => {
     const w = item.words[cur.selected];
     if (!w) { panel.hidden = true; return; }
     panel.hidden = false;
-    const fresh = [...new Set([...w.text].filter((c) => isHan(c) && !known.chars.has(c)))];
+    const word = hanChars(w.text).join("");
+    const freshChars = [...new Set(hanChars(w.text).filter((c) => !known.chars.has(c)))];
     const parts = [h("div", { class: "py" }, w.pinyin || "—"), h("div", {}, w.gloss || "")];
-    if (fresh.length) {
-      parts.push(h("div", { class: "row" }, fresh.map((c) => {
-        const level = hskLevelOf(c, state.settings.hskScheme);
-        return h("button", { class: "btn", type: "button", onclick: () => markKnown(c) }, `I know ${c}`, level ? h("span", { class: "muted" }, ` · HSK ${level === 7 ? "7-9" : level}`) : null);
-      })));
+    const actions = [];
+    if (!isKnownWord(w.text, known) && word.length > 1) {
+      actions.push(h("button", { class: "btn", type: "button", onclick: () => markWordKnown(word) }, `I know ${word}`));
     }
+    freshChars.forEach((c) => {
+      const level = hskLevelOf(c, state.settings.hskScheme);
+      actions.push(h("button", { class: "btn", type: "button", onclick: () => markKnown(c) }, `I know ${c}`, level ? h("span", { class: "muted" }, ` · HSK ${level === 7 ? "7-9" : level}`) : null));
+    });
+    if (actions.length) parts.push(h("div", { class: "row" }, actions));
     panel.replaceChildren(...parts);
   };
   const buttons = item.words.map((w, i) => {
-    const hasHan = [...w.text].some(isHan);
-    if (!hasHan) return h("span", { class: "word punct" }, w.text);
+    if (!hanChars(w.text).length) return h("span", { class: "word punct" }, showPinyin && h("span", { class: "py-top" }, "\u00a0"), h("span", { class: "zh" }, w.text));
     return h("button", {
-      class: "word", type: "button", "aria-pressed": String(cur.selected === i),
+      class: `word${isKnownWord(w.text, known) ? " known" : ""}`, type: "button", "aria-pressed": String(cur.selected === i),
       onclick: () => {
         cur.selected = cur.selected === i ? -1 : i;
         buttons.forEach((b, j) => b.tagName === "BUTTON" && b.setAttribute("aria-pressed", String(j === cur.selected)));
         fill();
       },
-    }, chars(w.text));
+    }, showPinyin && h("span", { class: "py-top", lang: "zh-Latn" }, w.pinyin || "\u00a0"), h("span", { class: "zh" }, w.text));
   });
   fill();
-  return h("div", {}, h("div", { class: "words", lang: "zh-Hans" }, buttons), panel,
-    h("p", { class: "muted small" }, "Tap a word for pinyin and meaning.", known.chars.size ? " Underlined characters are new to you." : ""));
+  return h("div", {},
+    h("div", { class: "words", lang: "zh-Hans" }, buttons),
+    panel,
+    h("div", { class: "row between ref-foot" },
+      h("span", { class: "muted small" }, "Underlined words are ones you know. Tap a word for its meaning."),
+      h("button", { class: "linkish muted small", type: "button", onclick: () => { state.settings.showPinyin = !showPinyin; save(); render(); } }, showPinyin ? "Hide pinyin" : "Show pinyin")));
 }
 
 function markKnown(ch) {
   if (!known.chars.has(ch)) {
     state.extraKnown = (state.extraKnown || "") + ch;
+    save();
+  }
+  render();
+}
+
+function markWordKnown(word) {
+  if (!(state.extraWords || []).includes(word)) {
+    state.extraWords = [...(state.extraWords || []), word];
     save();
   }
   render();
@@ -377,8 +419,9 @@ function feedbackView() {
     !grade.skipped && [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, answer)],
     changed && [h("h3", {}, "Your answer, corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, grade.corrected)],
 
-    h("h3", {}, "Reference answer"),
+    h("h3", {}, "Reference answer", item.hsk ? h("span", { class: "tag inline" }, item.hsk) : null),
     referenceBlock(item, cur),
+    item.note && h("p", { class: "ref-note" }, item.note),
 
     grade.issues.length ? [h("h3", {}, "What to fix"), grade.issues.map((i) =>
       h("div", { class: "issue" },
@@ -425,7 +468,7 @@ function summaryView() {
       h("div", { class: "stat" }, h("b", {}, average), h("span", {}, "average score")),
       h("div", { class: "stat" }, h("b", {}, passed), h("span", {}, `scored ${PASS_SCORE} or more`))),
     h("h3", {}, "Sentences"),
-    results.map((r) => attemptRow({ ...r.grade, english: r.item.english, chinese: r.item.chinese, answer: r.answer })),
+    results.map((r) => attemptRow({ ...r.grade, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, sentenceNote: r.item.note, answer: r.answer })),
     h("div", { class: "sticky-actions" }, h("button", { class: "btn primary wide", type: "button", onclick: () => { P = { phase: "setup" }; render(); } }, "New session")));
 }
 
@@ -440,7 +483,9 @@ function attemptRow(a) {
         h("div", { class: "zh", lang: "zh-Hans" }, a.answer || "(answer shown)"),
         a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : ""))),
     h("div", { class: "body" },
-      h("h3", {}, "Reference answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, a.chinese),
+      h("h3", {}, "Reference answer", a.hsk ? h("span", { class: "tag inline" }, a.hsk) : null),
+      referenceBlock(a, { selected: -1 }),
+      a.sentenceNote && h("p", { class: "ref-note" }, a.sentenceNote),
       a.corrected && a.corrected !== a.answer && [h("h3", {}, "Your answer, corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, a.corrected)],
       a.issues?.length ? [h("h3", {}, "What to fix"), a.issues.map((i) => h("div", { class: "issue" },
         h("div", {}, i.quote && h("span", { class: "quote" }, i.quote), i.fix && h("span", { class: "fix" }, i.fix)), h("div", {}, i.problem)))] : null,
@@ -523,14 +568,16 @@ function settingsView() {
   } });
   const extra = h("textarea", { id: "extra", rows: "2", lang: "zh-Hans", class: "hanzi", value: state.extraKnown || "",
     onchange: (e) => { state.extraKnown = [...new Set([...e.target.value].filter(isHan))].join(""); save(); render(); } });
+  const extraWords = h("textarea", { id: "extrawords", rows: "2", lang: "zh-Hans", class: "hanzi", value: (state.extraWords || []).join(" "),
+    onchange: (e) => { state.extraWords = [...new Set(e.target.value.split(/[^\u4e00-\u9fff]+/).filter(Boolean))]; save(); render(); } });
   const hanlyCard = h("section", { class: "card" },
-    h("h2", {}, "Characters you know"),
+    h("h2", {}, "Characters and words you know"),
     flashFor("hanly"),
     h("div", { class: "stats" },
       h("div", { class: "stat" }, h("b", {}, known.chars.size), h("span", {}, "known characters")),
       h("div", { class: "stat" }, h("b", {}, known.hanlyCount), h("span", {}, "from Hanly")),
       h("div", { class: "stat" }, h("b", {}, known.added), h("span", {}, "added here")),
-      h("div", { class: "stat" }, h("b", {}, known.words.length), h("span", {}, "known words"))),
+      h("div", { class: "stat" }, h("b", {}, known.wordSet.size), h("span", {}, "known words"))),
     h("div", { class: "field" },
       h("h3", {}, "Hanly progress file"),
       state.hanly
@@ -549,6 +596,10 @@ function settingsView() {
       h("label", { for: "extra" }, "Characters added here"),
       extra,
       h("div", { class: "hint" }, "Characters you marked “I know” during practice. You can add or delete characters by hand.")),
+    h("div", { class: "field" },
+      h("label", { for: "extrawords" }, "Words added here"),
+      extraWords,
+      h("div", { class: "hint" }, "Words you marked “I know” during practice, separated by spaces. Known words include every passing Hanly item, single characters too.")),
     known.chars.size ? [h("h3", {}, "All known characters"), h("div", { class: "known-chars", lang: "zh-Hans", tabindex: "0" }, [...known.chars].join(""))] : null);
 
   // --- HSK
