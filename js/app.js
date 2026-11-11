@@ -1,7 +1,7 @@
 import { state, save, getApiKey, setApiKey, exportData, importData, resetAll } from "./store.js";
 import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, PROVIDERS, providerOf, gradeAnswer, followUp } from "./claude.js";
-import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
+import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
@@ -40,6 +40,18 @@ function modelPicker(id, onchange) {
   return select;
 }
 
+// A styled file chooser: a button, with the chosen file's name beside it.
+function filePicker(id, label, onFile) {
+  const name = h("span", { class: "file-name muted small" });
+  const input = h("input", { type: "file", id, accept: ".json,application/json", onchange: (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    name.textContent = f.name;
+    onFile(f);
+  } });
+  return h("div", { class: "file" }, h("label", { class: "btn", for: id }, label), input, name);
+}
+
 // ---------- navigation ----------
 
 let view = "practice";
@@ -63,6 +75,8 @@ function render() {
     else tab.removeAttribute("aria-current");
   });
   const content = view === "history" ? historyView() : view === "settings" ? settingsView() : practiceView();
+  // Short practice screens sit in the middle of the page on a tall display.
+  main.classList.toggle("centered", view === "practice" && ["loading", "answer", "grading"].includes(P.phase));
   main.replaceChildren(...[content].flat());
 }
 
@@ -89,9 +103,7 @@ function onboardingView() {
   const s = state.settings;
   const finish = () => { state.onboarded = true; flash = null; save(); render(); window.scrollTo(0, 0); };
 
-  const file = h("input", { type: "file", id: "ob-hanly", accept: ".json,application/json", onchange: async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
+  const file = filePicker("ob-hanly", "Choose Hanly file", async (f) => {
     try {
       state.hanly = { importedAt: Date.now(), fileName: f.name, entries: parseHanly(await f.text()) };
       save();
@@ -99,9 +111,9 @@ function onboardingView() {
     } catch (error) {
       note("ob-hanly", "error", error.message);
     }
-  } });
+  });
 
-  const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: getApiKey(provider()) ? "A key is saved on this device" : keyHint(),
+  const keyInput = h("input", { type: "password", id: "ob-key", autocomplete: "off", placeholder: keyHint(),
     // Updated in place (no re-render, no layout shift) so a tap on another control right after typing is not lost.
     onchange: (e) => { const v = e.target.value.trim(); if (v) { setApiKey(v, provider()); keyStatus.textContent = "Key saved on this device."; } } });
   const keyStatus = h("div", { class: "hint", role: "status" }, getApiKey(provider()) ? "Key saved on this device." : "No key saved yet.");
@@ -113,7 +125,7 @@ function onboardingView() {
   return [
     h("section", { class: "card" },
       h("h1", {}, "Set up your practice"),
-      h("p", { class: "lede" }, "Four quick choices so sentences match what you already know. Everything here can be changed later in Settings.")),
+      h("p", { class: "lede tight" }, "Four quick choices so sentences match what you already know. Everything here can be changed later in Settings.")),
 
     h("section", { class: "card" },
       h("h2", {}, "1. Bring in your Hanly progress"),
@@ -155,6 +167,8 @@ function onboardingView() {
       h("button", { class: "btn primary", type: "button", onclick: finish }, "Start practising")),
   ];
 }
+
+let adjustOpen = false; // whether "Adjust session" is expanded on the setup screen
 
 function setupView() {
   const s = state.settings;
@@ -203,41 +217,48 @@ function setupView() {
     h("div", { class: "segmented", role: "group" },
       options.map(([value, label]) => h("button", { type: "button", "aria-pressed": String(s[key] === value), onclick: () => set(key, value) }, label)));
 
+  const weak = state.weak || [];
+  const summary = [
+    `${newPctText(s.maxNewPct)} new characters`,
+    `${newPctText(s.maxNewWordsPct)} new words`,
+    hskLabel() || "no HSK cap",
+    s.grammar || "any grammar",
+  ].join(" · ");
+
   return h("section", { class: "card" },
     h("h1", {}, "Sentence practice"),
-    h("p", { class: "lede" }, "Read an English sentence, write it in Chinese, and get feedback on your answer."),
+    h("p", { class: "lede" }, `${due} due for review · ${known.chars.size} characters known`),
     !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key to generate and grade sentences. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     !state.hanly && h("div", { class: "notice" }, "No Hanly progress imported yet, so the app does not know which characters you know. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Import it in Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
-    h("div", { class: "stats" },
-      h("div", { class: "stat" }, h("b", {}, known.chars.size), h("span", {}, "characters you know")),
-      h("div", { class: "stat" }, h("b", {}, due), h("span", {}, due === 1 ? "sentence due for review" : "sentences due for review"))),
-    h("h3", {}, "This session"),
+    h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()), onclick: startSession }, `Start · ${s.sessionLength} sentences`),
+    weak.length ? h("p", { class: "muted small focus-line" }, "Coming back in new sentences: ", h("span", { class: "hanzi", lang: "zh-Hans" }, weak.slice(0, 8).map((w) => w.text).join(" ")), " ",
+      h("button", { class: "linkish", type: "button", onclick: () => { state.weak = []; save(); render(); } }, "Clear")) : null,
     h("div", { class: "field" },
       h("label", { for: "theme" }, "Theme"),
-      themeSelect,
-      h("div", { class: "hint" }, "Practise one theme at a time, or leave it on the random mix.")),
-    h("div", { class: "field" },
-      h("div", { class: "label" }, "Number of sentences"),
-      segmented("sessionLength", [[5, "5"], [10, "10"], [15, "15"], [20, "20"]])),
-    h("div", { class: "field" },
-      h("label", { for: "maxnew" }, "New characters per sentence: ", pctLabel),
-      slider,
-      h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know.")),
-    h("div", { class: "field" },
-      h("label", { for: "maxnewwords" }, "New words per sentence: ", wordsLabel),
-      wordsSlider,
-      h("div", { class: "hint" }, "The largest share of a sentence's words that may be new. A word is known if you studied it in Hanly, marked it here, or it is a single character you know.")),
-    h("div", { class: "field" },
-      h("div", { class: "label" }, `New characters and grammar up to (${s.hskScheme === "old" ? "HSK 2.0" : "HSK 3.0"})`),
-      segmented("hskCap", [[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"], [0, "No cap"]])),
-    h("div", { class: "field" },
-      h("label", { for: "grammar" }, "Grammar pattern"),
-      grammarSelect),
-    h("button", { class: "btn primary wide", type: "button", disabled: !getApiKey(provider()), onclick: startSession }, "Start session"));
+      themeSelect),
+    h("details", { class: "adjust", open: adjustOpen, ontoggle: (e) => { adjustOpen = e.target.open; } },
+      h("summary", {}, h("span", { class: "adjust-title" }, "Adjust session"), h("span", { class: "muted small" }, summary)),
+      h("div", { class: "field" },
+        h("div", { class: "label" }, "Number of sentences"),
+        segmented("sessionLength", [[5, "5"], [10, "10"], [15, "15"], [20, "20"]])),
+      h("div", { class: "field" },
+        h("label", { for: "maxnew" }, "New characters per sentence: ", pctLabel),
+        slider,
+        h("div", { class: "hint" }, "The largest share of a sentence's characters that may be ones you have not learned. At 0% sentences use only characters you know.")),
+      h("div", { class: "field" },
+        h("label", { for: "maxnewwords" }, "New words per sentence: ", wordsLabel),
+        wordsSlider,
+        h("div", { class: "hint" }, "The largest share of a sentence's words that may be new. A word is known if you studied it in Hanly, marked it here, or it is a single character you know.")),
+      h("div", { class: "field" },
+        h("div", { class: "label" }, `New characters and grammar up to (${s.hskScheme === "old" ? "HSK 2.0" : "HSK 3.0"})`),
+        segmented("hskCap", [[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"], [6, "6"], [0, "None"]])),
+      h("div", { class: "field" },
+        h("label", { for: "grammar" }, "Grammar pattern"),
+        grammarSelect)));
 }
 
-const newPctText = (pct) => (pct === 0 ? "none" : pct >= 100 ? "no limit" : `up to ${pct}%`);
+const newPctText = (pct) => (pct === 0 ? "no" : pct >= 100 ? "any" : `up to ${pct}%`);
 
 async function startSession() {
   P = { phase: "loading", message: "Writing sentences…" };
@@ -247,11 +268,17 @@ async function startSession() {
       P.message = message;
       if (view === "practice" && P.phase === "loading") render();
     });
-    P = { phase: "answer", items, index: 0, results: [], draft: "" };
+    beginSession(items);
   } catch (error) {
     P = { phase: "setup", error: error.message };
+    render();
   }
+}
+
+function beginSession(items) {
+  P = { phase: "answer", items, index: 0, results: [], draft: "", hintLevel: 0, newShown: false };
   render();
+  window.scrollTo(0, 0);
   focusAnswer();
 }
 
@@ -274,8 +301,7 @@ function itemTags(item) {
     item.theme && h("span", { class: "tag" }, item.theme),
     item.grammar && h("span", { class: "tag hanzi" }, item.grammar),
     item.hsk && h("span", { class: "tag" }, item.hsk),
-    h("span", { class: "tag" }, newShareText(item)),
-    item.overLimit && h("span", { class: "tag review" }, "Over your limit for new material"));
+    h("span", { class: "tag" }, newShareText(item)));
 }
 
 function newShareText(item) {
@@ -285,24 +311,59 @@ function newShareText(item) {
   return w == null ? `${c}% new characters` : `${c}% new characters · ${w}% new words`;
 }
 
+// Words in the sentence the learner has not studied, without repeats.
+function newWordsOf(item) {
+  const seen = new Set();
+  return (item.words || []).filter((w) => {
+    if (!hanChars(w.text).length || isKnownWord(w.text, known) || seen.has(w.text)) return false;
+    seen.add(w.text);
+    return true;
+  });
+}
+
+// Enter on its own submits; Shift+Enter makes a new line. Enter that confirms
+// a pinyin candidate (composition) is left alone.
+const isPlainEnter = (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
+
 function answerView() {
   const item = P.items[P.index];
   const grading = P.phase === "grading";
   const input = h("textarea", {
     id: "answer", class: "answer-input", lang: "zh-Hans", rows: "2", placeholder: "用中文写…",
-    autocapitalize: "off", autocorrect: "off", spellcheck: "false", "aria-label": "Your Chinese translation",
+    autocapitalize: "off", autocorrect: "off", spellcheck: "false", "aria-label": "Your Chinese translation", enterkeyhint: "done",
     disabled: grading, value: P.draft || "",
     oninput: (e) => { P.draft = e.target.value; check.disabled = !P.draft.trim(); },
-    onkeydown: (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.isComposing) submitAnswer(); },
+    onkeydown: (e) => { if (isPlainEnter(e)) { e.preventDefault(); submitAnswer(); } },
   });
   const check = h("button", { class: "btn primary grow", type: "button", disabled: grading || !(P.draft || "").trim(), onclick: submitAnswer }, grading ? "Checking…" : "Check answer");
+
+  // New words are given, so the sentence stays something you can produce.
+  const fresh = newWordsOf(item);
+  const showNew = P.newShown || item.overLimit;
+  const newWords = fresh.length ? h("div", { class: "newwords" },
+    showNew
+      ? [h("div", { class: "newwords-title" }, item.overLimit ? "This sentence goes past your limit, so its new words are given:" : "New words in this sentence:"),
+        h("ul", {}, fresh.map((w) => h("li", {}, h("span", { class: "hanzi nw", lang: "zh-Hans" }, w.text), h("span", { class: "muted" }, ` ${w.pinyin}`), w.gloss ? ` — ${w.gloss}` : "")))]
+      : h("button", { class: "linkish", type: "button", onclick: () => { P.newShown = true; render(); focusAnswer(); } }, fresh.length === 1 ? "Show the 1 new word" : `Show the ${fresh.length} new words`)) : null;
+
+  // Hints: first word, then the pinyin of the whole sentence.
+  const words = (item.words || []).filter((w) => hanChars(w.text).length);
+  const maxHint = words.length ? 2 : 1;
+  const hintText = P.hintLevel >= 2
+    ? [h("span", { class: "muted" }, "Pinyin: "), words.map((w) => w.pinyin).join(" ")]
+    : P.hintLevel === 1
+      ? [h("span", { class: "muted" }, "Starts with: "), h("span", { class: "hanzi nw", lang: "zh-Hans" }, words.length ? words[0].text : [...item.chinese][0]), "…"]
+      : null;
+
   return h("section", { class: "card" },
     progressBar(),
     itemTags(item),
     h("p", { class: "prompt" }, item.english),
+    newWords,
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
-    h("div", { class: "field" }, input),
+    h("div", { class: "field" }, input, hintText && h("div", { class: "hintline", role: "status" }, hintText)),
     h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", disabled: grading || P.hintLevel >= maxHint, onclick: () => { P.hintLevel += 1; render(); focusAnswer(); } }, P.hintLevel ? "Another hint" : "Hint"),
       h("button", { class: "btn", type: "button", disabled: grading, onclick: skipAnswer }, "Show answer"),
       check));
 }
@@ -327,33 +388,89 @@ async function submitAnswer() {
 
 function skipAnswer() {
   const item = P.items[P.index];
-  finishItem(item, "", { score: 0, verdict: "Answer shown", corrected: "", strengths: [], issues: [], note: "", skipped: true });
+  finishItem(item, "", { score: 0, verdict: "Answer shown", corrected: "", strengths: [], issues: [], weak: [], note: "", skipped: true });
 }
 
 function finishItem(item, answer, grade) {
   recordAttempt(item, answer, grade);
-  P.results.push({ item, answer, grade });
-  P.current = { item, answer, grade, suggested: suggestRating(grade), rated: false, thread: [], selected: -1 };
+  addWeak(grade.weak);
+  // A hint means the sentence was not fully recalled, whatever the score.
+  let suggested = suggestRating(grade);
+  const order = RATINGS.map((r) => r.id);
+  const cap = P.hintLevel >= 2 ? "hard" : P.hintLevel === 1 ? "recalled" : "easy";
+  if (order.indexOf(suggested) > order.indexOf(cap)) suggested = cap;
+  const result = { item, answer, grade, rating: null };
+  P.results.push(result);
+  P.current = { item, answer, grade, result, suggested, rated: false, thread: [], selected: -1, retry: null };
   P.phase = "feedback";
   P.error = "";
   render();
   window.scrollTo(0, 0);
 }
 
+// ---------- comparing two Chinese strings ----------
+
+const squashText = (t) => String(t || "").replace(/\s+/g, "");
+const hanOnly = (t) => hanChars(String(t || "")).join("");
+
+// Marks which characters of `a` and `b` are shared (longest common
+// subsequence). Punctuation is never marked as a difference.
+function diffChars(a, b) {
+  const x = [...squashText(a)];
+  const y = [...squashText(b)];
+  const m = x.length;
+  const n = y.length;
+  const t = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) t[i][j] = x[i] === y[j] ? t[i + 1][j + 1] + 1 : Math.max(t[i + 1][j], t[i][j + 1]);
+  const sameX = new Array(m).fill(false);
+  const sameY = new Array(n).fill(false);
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (x[i] === y[j]) { sameX[i++] = true; sameY[j++] = true; }
+    else if (t[i + 1][j] >= t[i][j + 1]) i++;
+    else j++;
+  }
+  const mark = (chars, same) => chars.map((ch, k) => ({ ch, same: same[k] || !isHan(ch) }));
+  return [mark(x, sameX), mark(y, sameY)];
+}
+
+const diffLine = (marks, cls) => marks.map((c) => (c.same ? c.ch : h("span", { class: cls }, c.ch)));
+
+// ---------- audio ----------
+
+const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
+function speak(text) {
+  if (!canSpeak) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "zh-CN";
+  u.rate = 0.9;
+  const voice = speechSynthesis.getVoices().find((v) => /^zh([-_](CN|Hans))?/i.test(v.lang));
+  if (voice) u.voice = voice;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+
 // The reference sentence, Hanly-style: pinyin above each word, words you know
-// underlined. Tap a word for its meaning.
+// underlined, new words dotted. Tap a word for its meaning.
 function referenceBlock(item, cur) {
-  if (!item.words) return h("p", { class: "line-zh", lang: "zh-Hans" }, item.chinese);
+  const listen = canSpeak ? h("button", { class: "linkish muted small", type: "button", onclick: () => speak(item.chinese) }, "Listen") : null;
+  if (!item.words) return h("div", {}, h("p", { class: "line-zh", lang: "zh-Hans" }, item.chinese), listen);
   const showPinyin = state.settings.showPinyin;
 
-  const panel = h("div", { class: "gloss", hidden: cur.selected < 0 });
+  // The panel always takes up its space, so tapping a word moves nothing.
+  const panel = h("div", { class: "gloss" });
   const fill = () => {
     const w = item.words[cur.selected];
-    if (!w) { panel.hidden = true; return; }
-    panel.hidden = false;
+    if (!w) {
+      panel.classList.add("empty");
+      panel.replaceChildren("Tap a word for its meaning.");
+      return;
+    }
+    panel.classList.remove("empty");
     const word = hanChars(w.text).join("");
     const freshChars = [...new Set(hanChars(w.text).filter((c) => !known.chars.has(c)))];
-    const parts = [h("div", { class: "py" }, w.pinyin || "—"), h("div", {}, w.gloss || "")];
+    const parts = [h("div", { class: "gloss-main" }, h("span", { class: "py" }, w.pinyin || "—"), h("span", {}, w.gloss || ""))];
     const actions = [];
     if (!isKnownWord(w.text, known) && word.length > 1) {
       actions.push(h("button", { class: "btn", type: "button", onclick: () => markWordKnown(word) }, `I know ${word}`));
@@ -366,23 +483,24 @@ function referenceBlock(item, cur) {
     panel.replaceChildren(...parts);
   };
   const buttons = item.words.map((w, i) => {
-    if (!hanChars(w.text).length) return h("span", { class: "word punct" }, showPinyin && h("span", { class: "py-top" }, "\u00a0"), h("span", { class: "zh" }, w.text));
+    if (!hanChars(w.text).length) return h("span", { class: "word punct" }, showPinyin && h("span", { class: "py-top" }, " "), h("span", { class: "zh" }, w.text));
     return h("button", {
-      class: `word${isKnownWord(w.text, known) ? " known" : ""}`, type: "button", "aria-pressed": String(cur.selected === i),
+      class: `word ${isKnownWord(w.text, known) ? "known" : "new"}`, type: "button", "aria-pressed": String(cur.selected === i),
       onclick: () => {
         cur.selected = cur.selected === i ? -1 : i;
         buttons.forEach((b, j) => b.tagName === "BUTTON" && b.setAttribute("aria-pressed", String(j === cur.selected)));
         fill();
       },
-    }, showPinyin && h("span", { class: "py-top", lang: "zh-Latn" }, w.pinyin || "\u00a0"), h("span", { class: "zh" }, w.text));
+    }, showPinyin && h("span", { class: "py-top", lang: "zh-Latn" }, w.pinyin || " "), h("span", { class: "zh" }, w.text));
   });
   fill();
   return h("div", {},
     h("div", { class: "words", lang: "zh-Hans" }, buttons),
     panel,
     h("div", { class: "row between ref-foot" },
-      h("span", { class: "muted small" }, "Underlined words are ones you know. Tap a word for its meaning."),
-      h("button", { class: "linkish muted small", type: "button", onclick: () => { state.settings.showPinyin = !showPinyin; save(); render(); } }, showPinyin ? "Hide pinyin" : "Show pinyin")));
+      h("span", { class: "muted small" }, "Solid underline: words you know. Dotted: new words."),
+      h("span", { class: "row" }, listen,
+        h("button", { class: "linkish muted small", type: "button", onclick: () => { state.settings.showPinyin = !showPinyin; save(); render(); } }, showPinyin ? "Hide pinyin" : "Show pinyin"))));
 }
 
 function markKnown(ch) {
@@ -401,14 +519,64 @@ function markWordKnown(word) {
   render();
 }
 
+const issueList = (issues) => issues.map((i) =>
+  h("div", { class: "issue" },
+    h("div", {}, i.quote && h("span", { class: "quote", lang: "zh-Hans" }, i.quote), i.fix && h("span", { class: "fix", lang: "zh-Hans" }, i.fix)),
+    h("div", {}, i.problem)));
+
+// "Try again from memory": the answers are hidden, the learner retypes the
+// sentence, and it is compared on the device (no AI call).
+function retryView(cur) {
+  const { item, grade } = cur;
+  const r = cur.retry;
+  const compare = () => {
+    const typed = (r.text || "").trim();
+    if (!typed) return;
+    const targets = [item.chinese, grade.corrected].filter(Boolean);
+    r.match = targets.some((t) => hanOnly(t) === hanOnly(typed));
+    // Show the difference against whichever version is closer.
+    const scored = targets.map((t) => ({ t, same: diffChars(typed, t)[1].filter((c) => c.same).length / Math.max(1, [...squashText(t)].length) }));
+    r.target = scored.sort((a, b) => b.same - a.same)[0].t;
+    r.checked = true;
+    render();
+  };
+  const input = h("textarea", {
+    id: "retry", class: "answer-input", lang: "zh-Hans", rows: "2", placeholder: "再写一次…", "aria-label": "Write the sentence again",
+    autocapitalize: "off", autocorrect: "off", spellcheck: "false", enterkeyhint: "done", value: r.text || "", disabled: r.checked,
+    oninput: (e) => { r.text = e.target.value; },
+    onkeydown: (e) => { if (isPlainEnter(e)) { e.preventDefault(); compare(); } },
+  });
+  let result = null;
+  if (r.checked) {
+    const [mine, theirs] = diffChars(r.text, r.target);
+    result = r.match
+      ? h("div", { class: "notice ok", role: "status" }, "That matches. Well recalled.")
+      : [h("div", { class: "notice", role: "status" }, "Not quite the same. The marked characters differ."),
+        h("h3", {}, "You wrote"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(mine, "del")),
+        h("h3", {}, "Correct sentence"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(theirs, "chg"))];
+  }
+  return h("section", { class: "card" },
+    progressBar(),
+    h("div", { class: "tags" }, h("span", { class: "tag review" }, "From memory")),
+    h("p", { class: "prompt" }, item.english),
+    h("div", { class: "field" }, input),
+    result,
+    h("div", { class: "row" },
+      !r.checked && h("button", { class: "btn primary grow", type: "button", onclick: compare }, "Compare"),
+      r.checked && !r.match && h("button", { class: "btn", type: "button", onclick: () => { cur.retry = { text: "" }; render(); document.getElementById("retry")?.focus(); } }, "Try once more"),
+      h("button", { class: r.checked ? "btn primary grow" : "btn", type: "button", onclick: () => { cur.retry = null; render(); window.scrollTo(0, 0); } }, "Back to feedback")));
+}
+
 function feedbackView() {
   const cur = P.current;
+  if (cur.retry) return retryView(cur);
   const { item, answer, grade } = cur;
-  const changed = grade.corrected && grade.corrected.replace(/\s+/g, "") !== answer.replace(/\s+/g, "");
+  const changed = grade.corrected && hanOnly(grade.corrected) !== hanOnly(answer);
+  const [mine, fixed] = changed ? diffChars(answer, grade.corrected) : [null, null];
 
   const threadBox = h("div", { class: "thread" }, cur.thread.map((m) => h("div", { class: `bubble ${m.role}` }, m.text)));
   const question = h("input", { type: "text", id: "followup", placeholder: "Ask about this sentence…", "aria-label": "Follow-up question", enterkeyhint: "send", disabled: cur.asking,
-    onkeydown: (e) => { if (e.key === "Enter" && !e.isComposing) ask(); } });
+    onkeydown: (e) => { if (isPlainEnter(e)) ask(); } });
   const ask = async () => {
     const text = question.value.trim();
     if (!text || cur.asking) return;
@@ -432,26 +600,31 @@ function feedbackView() {
   };
   if (cur.pending) { question.value = cur.pending; cur.pending = ""; }
 
+  const more = grade.strengths.length || grade.note || item.note;
+
   return h("section", { class: "card" },
     progressBar(),
     h("div", { class: "result-head" },
-      h("div", { class: `score ${scoreClass(grade.score)}`, "aria-label": `Score ${grade.score} out of 100` }, grade.skipped ? "–" : grade.score),
-      h("div", {}, h("div", { class: "verdict" }, grade.verdict))),
-    h("p", { class: "muted" }, item.english),
+      h("div", { class: `score ${grade.skipped ? "none" : scoreClass(grade.score)}`, "aria-label": grade.skipped ? "Answer shown" : `Score ${grade.score} out of 100` }, grade.skipped ? "–" : grade.score),
+      h("div", {}, h("div", { class: "verdict" }, grade.verdict), h("div", { class: "muted" }, item.english))),
 
-    !grade.skipped && [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, answer)],
-    changed && [h("h3", {}, "Your answer, corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, grade.corrected)],
+    grade.issues.length ? [h("h3", {}, "What to fix"), issueList(grade.issues)] : null,
+
+    !grade.skipped && [h("h3", {}, "Your answer"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, changed ? diffLine(mine, "del") : answer)],
+    changed && [h("h3", {}, "Corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(fixed, "chg"))],
 
     h("h3", {}, "Reference answer", item.hsk ? h("span", { class: "tag inline" }, item.hsk) : null),
     referenceBlock(item, cur),
-    item.note && h("p", { class: "ref-note" }, item.note),
 
-    grade.issues.length ? [h("h3", {}, "What to fix"), grade.issues.map((i) =>
-      h("div", { class: "issue" },
-        h("div", {}, i.quote && h("span", { class: "quote", lang: "zh-Hans" }, i.quote), i.fix && h("span", { class: "fix", lang: "zh-Hans" }, i.fix)),
-        h("div", {}, i.problem)))] : null,
-    grade.strengths.length ? [h("h3", {}, "What worked"), h("ul", { class: "points" }, grade.strengths.map((t) => h("li", {}, t)))] : null,
-    grade.note && [h("h3", {}, "For next time"), h("p", {}, grade.note)],
+    h("div", { class: "row retry-row" },
+      h("button", { class: "btn", type: "button", onclick: () => { cur.retry = { text: "" }; render(); window.scrollTo(0, 0); document.getElementById("retry")?.focus(); } }, "Try again from memory"),
+      h("span", { class: "muted small" }, "Hides the answers so you can write the sentence once more.")),
+
+    more ? h("details", { class: "more" },
+      h("summary", {}, "More feedback"),
+      item.note && [h("h3", {}, "About this sentence"), h("p", {}, item.note)],
+      grade.strengths.length ? [h("h3", {}, "What worked"), h("ul", { class: "points" }, grade.strengths.map((t) => h("li", {}, t)))] : null,
+      grade.note && [h("h3", {}, "For next time"), h("p", {}, grade.note)]) : null,
 
     h("h3", {}, "Ask a follow-up"),
     threadBox,
@@ -467,7 +640,7 @@ function feedbackView() {
         h("button", { class: `rate ${r.id}${r.id === cur.suggested ? " suggested" : ""}`, type: "button", "data-r": r.id, onclick: () => rate(r.id) },
           h("span", { class: "rate-label" }, `${i + 1}. ${r.label}`),
           h("span", { class: "rate-when" }, intervalText(nextInterval(currentInterval(item), r.id)))))),
-      h("p", { class: "muted small" }, "Your rating decides when this sentence comes back, and moves on to the next one. Forgot and Hard also bring it back at the end of this session.")));
+      h("p", { class: "muted small" }, "Your rating decides when this sentence comes back, and moves on. Forgot and Hard also bring it back at the end of this session. Return accepts the suggestion.")));
 }
 
 // Applies the rating to the current sentence. A sentence rated Forgot or Hard
@@ -476,7 +649,9 @@ function applyRating(rating) {
   const cur = P.current;
   if (!cur || cur.rated) return;
   cur.rated = true;
+  cur.result.rating = rating;
   setLastRating(rating);
+  if (rating === "recalled" || rating === "easy") easeWeak(cur.item.chinese, cur.grade.weak);
   const retry = scheduleReview(cur.item, rating);
   const tries = cur.item.tries || 0;
   if (retry && tries < 2) P.items.push({ ...cur.item, id: `${cur.item.id}-r${tries + 1}`, tries: tries + 1 });
@@ -487,11 +662,14 @@ function rate(rating) {
   nextItem();
 }
 
+// On the feedback screen, 1-4 rate the sentence and Return accepts the
+// suggested rating, unless the learner is typing somewhere.
 document.addEventListener("keydown", (e) => {
-  if (view !== "practice" || P.phase !== "feedback" || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  if (view !== "practice" || P.phase !== "feedback" || P.current?.retry || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (["INPUT", "TEXTAREA", "SELECT", "BUTTON", "SUMMARY"].includes(document.activeElement?.tagName)) return;
   const r = RATINGS[Number(e.key) - 1];
   if (r) rate(r.id);
+  else if (isPlainEnter(e)) rate(P.current.suggested);
 });
 
 function nextItem() {
@@ -499,6 +677,8 @@ function nextItem() {
   P.index += 1;
   P.phase = "answer";
   P.draft = "";
+  P.hintLevel = 0;
+  P.newShown = false;
   P.current = null;
   render();
   window.scrollTo(0, 0);
@@ -519,36 +699,45 @@ function endSession() {
 
 function summaryView() {
   const results = P.results;
-  const average = Math.round(results.reduce((sum, r) => sum + r.grade.score, 0) / results.length);
-  const passed = results.filter((r) => r.grade.score >= PASS_SCORE).length;
+  const graded = results.filter((r) => !r.grade.skipped);
+  const average = graded.length ? Math.round(graded.reduce((sum, r) => sum + r.grade.score, 0) / graded.length) : null;
+  // A sentence counts as missed when its last rating in the session was Forgot or Hard.
+  const last = new Map();
+  results.forEach((r) => last.set(r.item.chinese, r));
+  const missed = [...last.values()].filter((r) => r.rating === "forgot" || r.rating === "hard");
+  const retryMissed = () => beginSession(missed.map((r, i) => ({ ...r.item, id: `${r.item.id}-m${i}`, tries: 0 })));
+
   return h("section", { class: "card" },
     h("h1", {}, "Session finished"),
     h("div", { class: "stats" },
-      h("div", { class: "stat" }, h("b", {}, results.length), h("span", {}, results.length === 1 ? "sentence" : "sentences")),
-      h("div", { class: "stat" }, h("b", {}, average), h("span", {}, "average score")),
-      h("div", { class: "stat" }, h("b", {}, passed), h("span", {}, `scored ${PASS_SCORE} or more`))),
+      h("div", { class: "stat" }, h("b", {}, last.size), h("span", {}, last.size === 1 ? "sentence" : "sentences")),
+      h("div", { class: "stat" }, h("b", {}, average ?? "–"), h("span", {}, "average score")),
+      h("div", { class: "stat" }, h("b", {}, missed.length), h("span", {}, "to practise again"))),
+    results.length > graded.length && h("p", { class: "muted small" }, "Sentences where you chose Show answer are left out of the average."),
+    h("div", { class: "row summary-actions" },
+      missed.length ? h("button", { class: "btn primary grow", type: "button", onclick: retryMissed }, missed.length === 1 ? "Retry the 1 missed sentence" : `Retry the ${missed.length} missed sentences`) : null,
+      h("button", { class: missed.length ? "btn" : "btn primary grow", type: "button", onclick: () => { P = { phase: "setup" }; render(); } }, "New session")),
     h("h3", {}, "Sentences"),
-    results.map((r) => attemptRow({ ...r.grade, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, sentenceNote: r.item.note, answer: r.answer })),
-    h("div", { class: "sticky-actions" }, h("button", { class: "btn primary wide", type: "button", onclick: () => { P = { phase: "setup" }; render(); } }, "New session")));
+    results.map((r) => attemptRow({ ...r.grade, rating: r.rating, english: r.item.english, chinese: r.item.chinese, words: r.item.words, hsk: r.item.hsk, sentenceNote: r.item.note, answer: r.answer })));
 }
 
 // ---------- history ----------
 
 function attemptRow(a) {
+  const changed = a.corrected && hanOnly(a.corrected) !== hanOnly(a.answer);
   return h("details", { class: "hist" },
     h("summary", {},
-      h("div", { class: `score sm ${scoreClass(a.score)}` }, a.answer ? a.score : "–"),
+      h("div", { class: `score sm ${a.answer ? scoreClass(a.score) : "none"}` }, a.answer ? a.score : "–"),
       h("div", { class: "grow" },
         h("div", { class: "en" }, a.english),
-        h("div", { class: "zh", lang: "zh-Hans" }, a.answer || "(answer shown)"),
-        a.at && h("div", { class: "when" }, new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review ? " · review" : "", a.rating ? ` · rated ${RATINGS.find((r) => r.id === a.rating)?.label || a.rating}` : "", a.theme ? ` · ${a.theme}` : ""))),
+        a.answer ? h("div", { class: "zh", lang: "zh-Hans" }, a.answer) : h("div", { class: "muted small" }, "Answer shown"),
+        h("div", { class: "when" }, [a.at && new Date(a.at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }), a.review && "review", a.rating && `rated ${RATINGS.find((r) => r.id === a.rating)?.label || a.rating}`, a.theme].filter(Boolean).join(" · ")))),
     h("div", { class: "body" },
+      a.issues?.length ? [h("h3", {}, "What to fix"), issueList(a.issues)] : null,
+      changed && [h("h3", {}, "Corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, diffLine(diffChars(a.answer, a.corrected)[1], "chg"))],
       h("h3", {}, "Reference answer", a.hsk ? h("span", { class: "tag inline" }, a.hsk) : null),
       referenceBlock(a, { selected: -1 }),
-      a.sentenceNote && h("p", { class: "ref-note" }, a.sentenceNote),
-      a.corrected && a.corrected !== a.answer && [h("h3", {}, "Your answer, corrected"), h("p", { class: "line-zh sm", lang: "zh-Hans" }, a.corrected)],
-      a.issues?.length ? [h("h3", {}, "What to fix"), a.issues.map((i) => h("div", { class: "issue" },
-        h("div", {}, i.quote && h("span", { class: "quote" }, i.quote), i.fix && h("span", { class: "fix" }, i.fix)), h("div", {}, i.problem)))] : null,
+      a.sentenceNote && [h("h3", {}, "About this sentence"), h("p", {}, a.sentenceNote)],
       a.strengths?.length ? [h("h3", {}, "What worked"), h("ul", { class: "points" }, a.strengths.map((t) => h("li", {}, t)))] : null,
       a.note && [h("h3", {}, "For next time"), h("p", {}, a.note)]));
 }
@@ -565,7 +754,7 @@ function historyView() {
     h("div", { class: "stats" },
       h("div", { class: "stat" }, h("b", {}, list.length), h("span", {}, "sentences practised")),
       h("div", { class: "stat" }, h("b", {}, graded.length ? average : "–"), h("span", {}, "average score")),
-      h("div", { class: "stat" }, h("b", {}, state.reviews.length), h("span", {}, "waiting for review"))),
+      h("div", { class: "stat" }, h("b", {}, state.reviews.length), h("span", {}, "in review"))),
     h("h3", {}, "Most recent first"),
     list.map(attemptRow));
 }
@@ -613,9 +802,7 @@ function settingsView() {
     h("option", { value: "both" }, "Both scores reach the cut-off"),
     h("option", { value: "any" }, "Everything in the file counts"));
   ruleSelect.value = s.knownRule;
-  const file = h("input", { type: "file", id: "hanlyfile", accept: ".json,application/json", onchange: async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
+  const file = filePicker("hanlyfile", state.hanly ? "Choose a newer Hanly file" : "Choose Hanly file", async (f) => {
     try {
       const entries = parseHanly(await f.text());
       state.hanly = { importedAt: Date.now(), fileName: f.name, entries };
@@ -625,7 +812,7 @@ function settingsView() {
     } catch (error) {
       note("hanly", "error", error.message);
     }
-  } });
+  });
   const extra = h("textarea", { id: "extra", rows: "2", lang: "zh-Hans", class: "hanzi", value: state.extraKnown || "",
     onchange: (e) => { state.extraKnown = [...new Set([...e.target.value].filter(isHan))].join(""); save(); render(); } });
   const extraWords = h("textarea", { id: "extrawords", rows: "2", lang: "zh-Hans", class: "hanzi", value: (state.extraWords || []).join(" "),
@@ -633,11 +820,8 @@ function settingsView() {
   const hanlyCard = h("section", { class: "card" },
     h("h2", {}, "Characters and words you know"),
     flashFor("hanly"),
-    h("div", { class: "stats" },
-      h("div", { class: "stat" }, h("b", {}, known.chars.size), h("span", {}, "known characters")),
-      h("div", { class: "stat" }, h("b", {}, known.hanlyCount), h("span", {}, "from Hanly")),
-      h("div", { class: "stat" }, h("b", {}, known.added), h("span", {}, "added here")),
-      h("div", { class: "stat" }, h("b", {}, known.wordSet.size), h("span", {}, "known words"))),
+    h("p", { class: "count-line" }, h("b", {}, known.chars.size), " characters and ", h("b", {}, known.wordSet.size), " words known",
+      h("span", { class: "muted" }, ` · ${known.hanlyCount} characters from Hanly, ${known.added} added here`)),
     h("div", { class: "field" },
       h("h3", {}, "Hanly progress file"),
       state.hanly
@@ -673,9 +857,7 @@ function settingsView() {
       h("div", { class: "hint" }, hskLabel() ? `Current cap: ${hskLabel()}. Change the level on the Practice screen.` : "No cap is set. Change it on the Practice screen.")));
 
   // --- Backup
-  const restore = h("input", { type: "file", id: "restore", accept: ".json,application/json", onchange: async (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
+  const restore = filePicker("restore", "Choose backup file", async (f) => {
     try {
       importData(await f.text());
       P = { phase: "setup" };
@@ -683,7 +865,7 @@ function settingsView() {
     } catch (error) {
       note("backup", "error", error.message || "The file could not be read.");
     }
-  } });
+  });
   const dataCard = h("section", { class: "card" },
     h("h2", {}, "Your data"),
     flashFor("backup"),
@@ -691,23 +873,28 @@ function settingsView() {
     h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: downloadBackup }, "Download backup")),
     h("div", { class: "field" }, h("label", { for: "restore" }, "Restore from a backup"), restore,
       h("div", { class: "hint" }, "Replaces everything in the app on this device except API keys.")),
-    h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: () => { state.onboarded = false; save(); P = { phase: "setup" }; go("practice"); } }, "Run first-time setup again")),
+    h("div", { class: "field" }, h("button", { class: "btn", type: "button", onclick: () => { state.onboarded = false; save(); P = { phase: "setup" }; go("practice"); } }, "Run first-time setup again")));
+
+  const dangerCard = h("section", { class: "card danger-zone" },
+    h("h2", {}, "Delete data"),
+    flashFor("danger"),
+    h("p", { class: "small muted" }, "These cannot be undone. Download a backup first if you might want the data again."),
     h("div", { class: "row" },
       h("button", { class: "btn danger", type: "button", onclick: () => {
         if (!confirm("Delete all practice history from this device?")) return;
         state.history = [];
         save();
-        note("backup", "ok", "History deleted.");
+        note("danger", "ok", "History deleted.");
       } }, "Delete history"),
       h("button", { class: "btn danger", type: "button", onclick: () => {
         if (!confirm("Delete everything in the app on this device, including the Hanly import, history and reviews? API keys are kept.")) return;
         resetAll();
         P = { phase: "setup" };
-        note("backup", "ok", "Everything was deleted.");
+        note("danger", "ok", "Everything was deleted.");
       } }, "Delete everything")));
 
   const about = h("p", { class: "small muted" }, "HSK character levels are derived from the complete-hsk-vocabulary word lists by Yanis Zafirópulos (MIT licence).");
-  return [apiCard, hanlyCard, hskCard, dataCard, about];
+  return [apiCard, hanlyCard, hskCard, dataCard, dangerCard, about];
 }
 
 function downloadBackup() {

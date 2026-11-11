@@ -72,6 +72,7 @@ export async function buildSession(onProgress = () => {}) {
       hskLabel: hskLabel(),
       grammar: s.grammar,
       theme: s.theme,
+      focus: (state.weak || []).slice(0, 8).map((w) => w.text),
       // For a random mix, draw the themes here so the spread is really random.
       themes: s.theme ? null : shuffle(ALL_THEMES).slice(0, missing + 2),
       avoid: [...avoid, ...accepted.map((a) => a.english)],
@@ -221,6 +222,25 @@ export function scheduleReview(item, rating, now = Date.now()) {
   record.due = now + interval * DAY;
   save();
   return interval < 1;
+}
+
+// Words and patterns the learner got wrong are remembered so that new
+// sentences can bring them back in a different context.
+export function addWeak(texts) {
+  const list = state.weak || [];
+  for (const text of texts || []) {
+    const found = list.find((w) => w.text === text);
+    if (found) found.at = Date.now();
+    else list.unshift({ text, at: Date.now() });
+  }
+  state.weak = list.sort((a, b) => b.at - a.at).slice(0, 30);
+  save();
+}
+
+// A weak point is cleared once a sentence containing it is recalled.
+export function easeWeak(chinese, except = []) {
+  state.weak = (state.weak || []).filter((w) => except.includes(w.text) || !chinese.includes(w.text));
+  save();
 }
 
 export function setLastRating(rating) {

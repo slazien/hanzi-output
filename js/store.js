@@ -23,6 +23,7 @@ export const DEFAULTS = {
   hanly: null, // { importedAt, fileName, entries: { key: progressPercent } }
   extraKnown: "", // characters the user marked as known in this app
   extraWords: [], // words the user marked as known in this app
+  weak: [], // words and patterns recently got wrong: [{ text, at }]
   reviews: [], // low-scoring sentences scheduled to come back
   history: [], // newest first
 };
