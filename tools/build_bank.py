@@ -190,10 +190,20 @@ def theme_of(en, given=None):
 # ---------- collect sentences ----------
 entries = []   # dict(tokens=[(word, pinyin)], en, theme, src, ref, note)
 seen = set()
+# Pairs a quality pass judged unfit (fragments, mistranslations, unnatural
+# Chinese): see tools/audit_bank.mjs and tools/apply_audit.py.
+REJECTED = set()
+_rej = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bank_rejected.tsv")
+if os.path.exists(_rej):
+    for line in open(_rej, encoding="utf8"):
+        if line.startswith("#"): continue
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) >= 2: REJECTED.add((parts[0], parts[1]))
 def add(tokens, en, theme, src, ref="", note=""):
     zh = "".join(w for w, _ in tokens)
     key = "".join(han(zh))
     if not key or key in seen: return False
+    if (zh, en.strip()) in REJECTED: return False
     if not (2 <= len(key) <= 26) or max_level(zh) > 6: return False
     seen.add(key)
     entries.append({"tokens": tokens, "en": en.strip(), "theme": theme, "src": SRC_IDX[src], "ref": ref, "note": note.strip()})

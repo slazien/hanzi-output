@@ -37,3 +37,19 @@ and how much the result changes between repeated runs.
 Run it after any change to the grading instructions or scoring. Answers the
 learner disputed in the app are kept in the app's exported data under
 `disputes`, and are good candidates for new cases.
+
+## Sentence quality pass (`audit_bank.mjs`, `apply_audit.py`)
+
+`audit_bank.mjs` sends every sentence pair in `data/bank.json` to a model, 25
+at a time, and records the pairs it judges unfit for practice: fragments that
+are not sentences, Chinese a native speaker would not say, garbled English,
+and English that says something different from the Chinese. It is told to be
+conservative. It can be stopped and restarted.
+
+    OPENAI_API_KEY=... node tools/audit_bank.mjs gpt-6-luna
+    python3 tools/apply_audit.py
+
+`apply_audit.py` removes the rejected pairs from `data/bank.json` and lists
+them, with the reason for each, in `bank_rejected.tsv`. `build_bank.py` reads
+that file, so a rebuild leaves the same pairs out. To put a pair back, delete
+its line and rebuild.
