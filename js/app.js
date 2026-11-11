@@ -9,7 +9,7 @@ import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CAT
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 
 const main = document.getElementById("main");
 
@@ -1040,9 +1040,9 @@ function accountCard() {
     h("h2", {}, "Account"),
     flashFor("account"),
     h("p", { class: "small muted" }, "Optional. Sign in to keep your progress safe and in step across devices. What is on this device now is combined with your account, not replaced."),
-    h("div", { class: "field" }, h("button", { class: "btn wide", type: "button", id: "acct-google", disabled: account.busy, onclick: () => run(signInWithGoogle, "") }, "Continue with Google")),
+    syncStatus.google && h("div", { class: "field" }, h("button", { class: "btn wide", type: "button", id: "acct-google", disabled: account.busy, onclick: () => run(signInWithGoogle, "") }, "Continue with Google")),
     h("div", { class: "field" },
-      h("label", { for: "acct-email" }, "Or sign in by email"),
+      h("label", { for: "acct-email" }, syncStatus.google ? "Or sign in by email" : "Sign in by email"),
       email,
       h("div", { class: "hint" }, "We email you a sign-in link. No password.")),
     !account.codeSent

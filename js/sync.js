@@ -9,7 +9,7 @@ import { state, save, onSave, replaceState } from "./store.js";
 import { mergeStates } from "./merge.js";
 
 export const accountsEnabled = Boolean(SUPABASE_URL && SUPABASE_KEY);
-export const status = { email: "", syncing: false, lastSync: 0, error: "" };
+export const status = { email: "", syncing: false, lastSync: 0, error: "", google: false };
 
 const PUSH_DELAY = 20000; // wait this long after the last change before uploading
 const listeners = new Set();
@@ -34,6 +34,11 @@ export function initSync() {
     // Supabase calls must not run inside this callback, so sync on the next tick.
     if (s && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) setTimeout(() => syncNow(), 0);
   });
+  // Offer Google only if it is switched on in the project.
+  fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_KEY } })
+    .then((r) => r.json())
+    .then((settings) => { status.google = Boolean(settings?.external?.google); notify(); })
+    .catch(() => {});
   onSave(() => {
     if (!session) return;
     dirty = true;
