@@ -1,13 +1,14 @@
 import { state, save, getApiKey, setApiKey, cleanApiKey, exportData, importData, resetAll } from "./store.js";
-import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, isKnownWord, measure, measureWords } from "./known.js";
+import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, hskAllowed, isKnownWord, measure, measureWords } from "./known.js";
 import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection, MODULE_VERSION } from "./claude.js";
-import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, nextInterval, currentInterval, intervalText, suggestRating } from "./session.js";
+import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
-import { loadBank, bankReady, creditOf } from "./bank.js";
+import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
+import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 
 const main = document.getElementById("main");
 
@@ -80,11 +81,12 @@ document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click",
 
 function render() {
   known = buildKnown(state);
+  if (typeof trackKnown === "function") trackKnown();
   document.querySelectorAll(".tab").forEach((tab) => {
     if (tab.dataset.view === view) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
   });
-  const content = view === "history" ? historyView() : view === "settings" ? settingsView() : practiceView();
+  const content = view === "history" ? historyView() : view === "progress" ? progressView() : view === "settings" ? settingsView() : practiceView();
   // Short practice screens sit in the middle of the page on a tall display.
   main.classList.toggle("centered", view === "practice" && ["loading", "answer", "grading"].includes(P.phase));
   main.replaceChildren(...[content].flat());
@@ -253,13 +255,14 @@ function setupView() {
     !getApiKey(provider()) && h("div", { class: "notice" }, `Add your ${providerName()} API key so your answers can be graded. `, h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Open Settings")),
     !state.hanly && h("div", { class: "notice" }, "No Hanly progress imported yet, so the app does not know which characters you know. ", h("button", { class: "linkish", type: "button", onclick: () => go("settings") }, "Import it in Settings")),
     P.error && h("div", { class: "notice error", role: "alert" }, P.error),
-    h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()) || fit === 0, onclick: startSession }, `Start · ${s.sessionLength} sentences`),
+    h("button", { class: "btn primary wide big", type: "button", id: "start", disabled: !getApiKey(provider()) || fit === 0, onclick: () => startSession() }, `Start · ${s.sessionLength} sentences`),
     h("p", { class: `small fit-line ${fit === 0 ? "warn" : "muted"}`, role: "status" }, fitText),
     weak.length ? h("p", { class: "muted small focus-line" }, "Coming back in new sentences: ", h("span", { class: "hanzi", lang: "zh-Hans" }, weak.slice(0, 8).map((w) => w.text).join(" ")), " ",
       h("button", { class: "linkish", type: "button", onclick: () => { state.weak = []; save(); render(); } }, "Clear")) : null,
     h("div", { class: "field" },
       h("label", { for: "theme" }, "Theme"),
       themeSelect),
+    weakList(),
     h("details", { class: "adjust", open: adjustOpen, ontoggle: (e) => { adjustOpen = e.target.open; } },
       h("summary", {}, h("span", { class: "adjust-title" }, "Adjust session"), h("span", { class: "muted small" }, summary)),
       h("div", { class: "field" },
@@ -281,16 +284,31 @@ function setupView() {
         grammarSelect)));
 }
 
+// Weak areas found in recent practice, each with a button for a focused session.
+function weakList() {
+  const areas = weakAreas(state.log || []).slice(0, 5);
+  if (!areas.length) return null;
+  const kind = { theme: "Theme", grammar: "Grammar", category: "Mistake type", word: "Word" };
+  return h("div", { class: "weak" },
+    h("h3", {}, "Weak areas"),
+    areas.map((a) => h("div", { class: "weak-row" },
+      h("div", { class: "grow" },
+        h("div", {}, h("span", { class: "muted small" }, `${kind[a.kind]}: `), h("b", { class: a.kind === "word" || a.kind === "grammar" ? "hanzi" : "" }, a.label)),
+        h("div", { class: "muted small" }, a.detail)),
+      h("button", { class: "btn", type: "button", disabled: !getApiKey(provider()), onclick: () => startSession(a) }, "Practise this"))),
+    h("p", { class: "muted small" }, "A focused session gives about 60% of its sentences to the area and mixes in ordinary ones."));
+}
+
 const newPctText = (pct) => (pct === 0 ? "no" : pct >= 100 ? "any" : `up to ${pct}%`);
 
-async function startSession() {
+async function startSession(focus = null) {
   P = { phase: "loading", message: "Choosing sentences…" };
   render();
   try {
     const { items, notice } = await buildSession((message) => {
       P.message = message;
       if (view === "practice" && P.phase === "loading") render();
-    });
+    }, focus);
     beginSession(items, notice);
   } catch (error) {
     P = { phase: "setup", error: error.message };
@@ -320,7 +338,8 @@ function progressBar() {
 
 function itemTags(item) {
   return h("div", { class: "tags" },
-    item.tries ? h("span", { class: "tag review" }, "Again") : item.reviewId && h("span", { class: "tag review" }, "Review"),
+    item.tries ? h("span", { class: "tag review" }, "Again") : item.reviewId && h("span", { class: "tag review" }, item.variantOf ? "Review, new wording" : "Review"),
+    item.focus && h("span", { class: "tag review" }, `Focus: ${item.focus}`),
     item.theme && h("span", { class: "tag" }, item.theme),
     item.grammar && h("span", { class: "tag hanzi" }, item.grammar),
     item.hsk && h("span", { class: "tag" }, item.hsk),
@@ -670,7 +689,7 @@ function feedbackView() {
       h("div", { class: "rates" }, RATINGS.map((r, i) =>
         h("button", { class: `rate ${r.id}${r.id === cur.suggested ? " suggested" : ""}`, type: "button", "data-r": r.id, onclick: () => rate(r.id) },
           h("span", { class: "rate-label" }, `${i + 1}. ${r.label}`),
-          h("span", { class: "rate-when" }, intervalText(nextInterval(currentInterval(item), r.id)))))),
+          h("span", { class: "rate-when" }, intervalText(previewInterval(item, r.id)))))),
       h("p", { class: "muted small" }, "Your rating decides when this sentence comes back, and moves on. Forgot and Hard also bring it back at the end of this session. Return accepts the suggestion.")));
 }
 
@@ -683,6 +702,8 @@ function applyRating(rating) {
   cur.result.rating = rating;
   setLastRating(rating);
   if (rating === "recalled" || rating === "easy") easeWeak(cur.item.chinese, cur.grade.weak);
+  const record = cur.item.reviewId ? state.reviews.find((r) => r.id === cur.item.reviewId) : null;
+  logAttempt(cur.item, cur.grade, rating, Boolean(record), record?.last ? (Date.now() - record.last) / 86400000 : 0);
   const retry = scheduleReview(cur.item, rating);
   const tries = cur.item.tries || 0;
   if (retry && tries < 2) P.items.push({ ...cur.item, id: `${cur.item.id}-r${tries + 1}`, tries: tries + 1 });
@@ -788,6 +809,103 @@ function historyView() {
       h("div", { class: "stat" }, h("b", {}, state.reviews.length), h("span", {}, "in review"))),
     h("h3", {}, "Most recent first"),
     list.map(attemptRow));
+}
+
+// ---------- progress ----------
+
+const pct = (x) => `${Math.round(x * 100)}%`;
+
+function barChart(items, { max, label, title }) {
+  return h("div", { class: "bars", role: "img", "aria-label": title },
+    items.map((it) => {
+      const bar = h("i");
+      bar.style.height = `${it.value == null ? 0 : Math.max(2, (it.value / max) * 100)}%`;
+      return h("div", { class: "bar-col" }, h("span", { class: "bar-val" }, it.value == null ? "–" : label(it)), h("div", { class: "bar-track" }, bar), h("span", { class: "bar-cap" }, it.caption));
+    }));
+}
+
+function breakdownTable(rows, name, format = (k) => k) {
+  if (!rows.length) return h("p", { class: "muted small" }, `Not enough practice yet to compare by ${name}. A row appears once it has at least 5 sentences in the last 60 days.`);
+  return h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, h("th", {}, name[0].toUpperCase() + name.slice(1)), h("th", {}, "Sentences"), h("th", {}, "Average score"), h("th", {}, "Missed"))),
+    h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, format(r.key)), h("td", {}, r.n), h("td", {}, r.score == null ? "–" : Math.round(r.score)), h("td", {}, pct(r.missRate))))));
+}
+
+function progressView() {
+  const log = state.log || [];
+  if (!log.length) {
+    return h("section", { class: "card" }, h("h1", {}, "Progress"), h("p", { class: "lede" }, "Rate a few sentences and your progress will appear here: recall on reviews, score trends, weak and strong areas, and what is coming up."));
+  }
+  const now = Date.now();
+  const recall = recallRate(log);
+  const week = log.filter((e) => now - e.t <= 7 * 86400000).length;
+  const weeks = weeklyScores(log);
+  const fc = forecast(state.reviews);
+  const cal = calendar(log);
+  const calMax = Math.max(1, ...cal.map((d) => d.n));
+  const dayName = (t) => new Date(t).toLocaleDateString([], { weekday: "short" });
+  const today = new Date(now).setHours(0, 0, 0, 0);
+
+  // How much of the bank is within reach.
+  let reach = null;
+  if (bankReady()) {
+    const base = { known, allowedNew: null, maxNewWordsPct: 100 };
+    reach = { total: bankReady().rows.length, onlyKnown: fitting({ ...base, maxNewPct: 0 }).length, oneFifth: fitting({ ...base, maxNewPct: 20 }).length };
+  }
+  const kl = state.knownLog || [];
+  const first = kl[0];
+
+  return [
+    h("section", { class: "card" },
+      h("h1", {}, "Progress"),
+      h("div", { class: "stats" },
+        h("div", { class: "stat" }, h("b", {}, recall.n >= 10 ? pct(recall.rate) : "–"), h("span", {}, recall.n >= 10 ? `recalled on review, last 30 days (${recall.n} reviews)` : `recall on review: needs 10 reviews (${recall.n} so far)`)),
+        h("div", { class: "stat" }, h("b", {}, week), h("span", {}, "sentences in the last 7 days")),
+        h("div", { class: "stat" }, h("b", {}, state.reviews.length), h("span", {}, `in review, ${fc[0]} due today`))),
+      h("h3", {}, "Average score by week"),
+      barChart(weeks.map((w) => ({ value: w.score, n: w.n, caption: new Date(w.end).toLocaleDateString([], { month: "short", day: "numeric" }) })), { max: 100, title: "Average score for each of the last eight weeks", label: (it) => `${Math.round(it.value)}` }),
+      h("p", { class: "muted small" }, "Each bar is the week ending on that date. Weeks with few sentences move a lot by chance: ", weeks.map((w) => w.n).join(", "), " sentences per week.")),
+
+    h("section", { class: "card" },
+      h("h2", {}, "Where you are strong and weak"),
+      h("p", { class: "muted small" }, "Last 60 days. “Missed” counts Forgot and shown answers fully, and Hard or a score under 60 as half."),
+      h("h3", {}, "By HSK level"), breakdownTable(breakdown(log, "h").sort((a, b) => a.key - b.key), "level", (k) => (k === 7 ? "HSK 7-9" : `HSK ${k}`)),
+      h("h3", {}, "By theme"), breakdownTable(breakdown(log, "th"), "theme"),
+      h("h3", {}, "By grammar pattern"), breakdownTable(breakdown(log, "g"), "pattern"),
+      h("h3", {}, "Mistake types"),
+      mistakeTable(log)),
+
+    h("section", { class: "card" },
+      h("h2", {}, "Coming up and recent days"),
+      h("h3", {}, "Reviews due in the next 7 days"),
+      barChart(fc.map((n, i) => ({ value: n, caption: i === 0 ? "Today" : dayName(today + i * 86400000) })), { max: Math.max(5, ...fc), title: "Reviews due on each of the next seven days", label: (it) => `${it.value}` }),
+      h("p", { class: "muted small" }, `Today includes anything overdue. At most 40 reviews are given per day; ${reviewsLeftToday()} left today.`),
+      h("h3", {}, "Days practised, last 12 weeks"),
+      h("div", { class: "cal", role: "img", "aria-label": "Sentences practised on each of the last 84 days" },
+        cal.map((d) => h("i", { class: `cal-day l${d.n === 0 ? 0 : Math.min(4, 1 + Math.floor((d.n / calMax) * 3))}`, title: `${new Date(d.date).toLocaleDateString([], { month: "short", day: "numeric" })}: ${d.n}` }))),
+      h("p", { class: "muted small" }, `Oldest at the top left, today at the bottom right. Darker means more sentences. ${cal.filter((d) => d.n).length} of 84 days practised.`)),
+
+    h("section", { class: "card" },
+      h("h2", {}, "Characters and words"),
+      h("div", { class: "stats" },
+        h("div", { class: "stat" }, h("b", {}, known.chars.size), h("span", {}, first && first.chars !== known.chars.size ? `characters known (${known.chars.size - first.chars >= 0 ? "+" : ""}${known.chars.size - first.chars} since ${new Date(first.t).toLocaleDateString([], { month: "short", day: "numeric" })})` : "characters known")),
+        h("div", { class: "stat" }, h("b", {}, known.wordSet.size), h("span", {}, first && first.words !== known.wordSet.size ? `words known (${known.wordSet.size - first.words >= 0 ? "+" : ""}${known.wordSet.size - first.words})` : "words known"))),
+      reach ? h("p", {}, `Of the ${reach.total.toLocaleString()} sentences in the bank, `, h("b", {}, reach.onlyKnown.toLocaleString()), " use only characters you know and ", h("b", {}, reach.oneFifth.toLocaleString()), " have at most 20% new characters.")
+        : h("p", { class: "muted small" }, "Loading the sentence bank…"),
+      h("p", { class: "muted small" }, "Known characters and words change when you import a newer Hanly file or tap “I know” on a word in feedback.")),
+  ];
+}
+
+function mistakeTable(log) {
+  const now = Date.now();
+  const recent = log.filter((e) => e.sc != null && now - e.t <= 60 * 86400000);
+  const counts = new Map();
+  recent.forEach((e) => (e.c || []).forEach((c) => counts.set(c, (counts.get(c) || 0) + 1)));
+  const rows = [...counts.entries()].filter(([c]) => CATEGORIES[c]).sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return h("p", { class: "muted small" }, "No labelled mistakes yet. Each mistake the grader finds is given a type from now on.");
+  return h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, h("th", {}, "Type"), h("th", {}, "Times"), h("th", {}, "Share of graded answers"))),
+    h("tbody", {}, rows.map(([c, n]) => h("tr", {}, h("td", {}, CATEGORIES[c]), h("td", {}, n), h("td", {}, pct(n / recent.length))))));
 }
 
 // ---------- settings ----------
@@ -970,10 +1088,37 @@ function downloadBackup() {
 
 // ---------- start ----------
 
+// Devices that practised before the attempt log existed: rebuild it from the detailed history.
+if (!(state.log || []).length && state.history.length) {
+  const grade = { forgot: 1, hard: 2, recalled: 3, easy: 4 };
+  state.log = [...state.history].reverse().map((a) => {
+    const e = { t: a.at, sc: a.answer ? a.score : null, r: grade[a.rating] || (!a.answer ? 1 : a.score >= 80 ? 3 : a.score >= 50 ? 2 : 1) };
+    if (a.theme) e.th = a.theme;
+    const hsk = Number(String(a.hsk || "").replace(/\D+/g, "").slice(0, 1));
+    if (hsk) e.h = hsk;
+    if (a.grammar) e.g = a.grammar;
+    if (a.review) e.rv = 1;
+    return e;
+  });
+  save();
+}
+
+// Keep a dated record of how many characters and words are known.
+function trackKnown() {
+  const k = buildKnown(state);
+  const kl = (state.knownLog = state.knownLog || []);
+  const last = kl[kl.length - 1];
+  if (!k.chars.size || (last && last.chars === k.chars.size && last.words === k.wordSet.size)) return;
+  kl.push({ t: Date.now(), chars: k.chars.size, words: k.wordSet.size });
+  if (kl.length > 400) kl.splice(1, kl.length - 400);
+  save();
+}
+trackKnown();
+
 render();
 // Once the bank has loaded, refresh the session screen so it can show how many
 // sentences fit. Other screens are left alone so nothing being typed is lost.
-loadBank().then(() => { if (state.onboarded && view === "practice" && P.phase === "setup") render(); }).catch(() => {});
+loadBank().then(() => { if ((state.onboarded && view === "practice" && P.phase === "setup") || view === "progress") render(); }).catch(() => {});
 
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
   navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -115,8 +115,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 @media (max-width: 560px) {
   .brand-name { display: none; }
-  .tabs { flex: 1; justify-content: flex-end; }
-  .tab { padding: 9px 11px; }
+  .tabs { flex: 1; justify-content: flex-end; gap: 0; }
+  .tab { padding: 9px 8px; font-size: 0.92rem; }
 }
 
 /* ---------- layout ---------- */
@@ -434,6 +434,32 @@ ul.points li { margin-bottom: 4px; }
 .stat + .stat { padding-left: 16px; border-left: 1px solid var(--line); }
 .stat b { display: block; font-size: 1.6rem; line-height: 1.2; }
 .stat span { color: var(--muted); font-size: 0.85rem; }
+
+/* ---------- weak areas and progress ---------- */
+
+.weak { border-top: 1px solid var(--line); margin-bottom: 14px; }
+.weak h3 { margin-top: 16px; }
+.weak-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.weak-row .btn { min-height: 42px; padding: 6px 14px; flex: none; }
+
+.bars { display: flex; align-items: flex-end; gap: 8px; height: 170px; margin: 6px 0 8px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; min-width: 0; }
+.bar-val { font-size: 0.8rem; font-weight: 600; }
+.bar-track { flex: 1; width: 100%; max-width: 46px; display: flex; align-items: flex-end; background: var(--soft); border-radius: 6px; overflow: hidden; }
+.bar-track i { display: block; width: 100%; background: var(--ink); border-radius: 6px 6px 0 0; }
+.bar-cap { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.table th { text-align: left; font-size: 0.78rem; font-weight: 650; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); }
+.table td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); }
+.table th:not(:first-child), .table td:not(:first-child) { text-align: right; padding-right: 0; padding-left: 8px; white-space: nowrap; }
+
+.cal { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; max-width: 420px; margin: 6px 0 8px; }
+.cal-day { display: block; aspect-ratio: 1; border-radius: 4px; background: var(--soft); }
+.cal-day.l1 { background: color-mix(in srgb, var(--ink) 25%, var(--soft)); }
+.cal-day.l2 { background: color-mix(in srgb, var(--ink) 45%, var(--soft)); }
+.cal-day.l3 { background: color-mix(in srgb, var(--ink) 70%, var(--soft)); }
+.cal-day.l4 { background: var(--ink); }
 
 /* ---------- settings ---------- */
 
