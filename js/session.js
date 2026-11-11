@@ -84,7 +84,7 @@ export async function buildSession(onProgress = () => {}, focus = null) {
   const s = state.settings;
   const known = buildKnown(state);
   if (!known.chars.size && s.maxNewPct < 100) {
-    throw new ClaudeError("No known characters yet. Import your Hanly export in Settings, or set new characters to any.");
+    throw new ClaudeError("The app does not know which characters you know yet. Choose your level or import a Hanly export in Settings, or set new characters to any.");
   }
   const length = s.sessionLength;
   const reviewShare = focus ? 0.2 : 0.5;

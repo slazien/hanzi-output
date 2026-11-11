@@ -6,7 +6,7 @@ It is a static web app with no server. It can be installed on an iPad from Safar
 
 ## How it works
 
-- **First-run setup** – on first open, import the Hanly file, add the API key, pick the HSK level you are studying and set the new-character limit. It can be run again from Settings.
+- **First-run setup** – on first open, say which HSK level you already know and/or import a Hanly file, add the API key, pick the HSK level you are studying and set the new-character limit. It can be run again from Settings.
 - **Practice** – choose a theme (shopping, eating out, travel and about 35 others) or a random mix, the number of sentences, the largest share of new characters and of new words allowed per sentence (0–100% each), an HSK cap for new characters and grammar, and optionally a grammar pattern. The app picks sentences from the bank that fit, and shows how many do. No AI is used to get sentences.
 - **While answering** – new words in a sentence can be shown under the prompt, and a Hint button gives the first word, then the pinyin. Return checks the answer.
 - **Feedback** – a score out of 100, what to fix first, your answer with the changed characters marked against the correction, and a large reference answer with pinyin above each word (can be hidden), known words underlined and new words dotted, an HSK tag and a Listen button. Tap a word for its meaning or to mark it as known. "Try again from memory" hides the answers so you can write the sentence once more; it is compared on the device. There is also a follow-up question box.
