@@ -1,6 +1,6 @@
 # Juzi 句子
 
-Chinese sentence practice: read an English sentence, write it in simplified Chinese, and get it graded and explained by an AI model (OpenAI's GPT models or Claude, using your own API key). Sentences come from a stored bank of about 18,000 and are chosen to fit the characters and words you already know, taken from a Hanly progress export.
+Chinese sentence practice: read an English sentence, write it in simplified Chinese, and get it graded and explained by an AI model (OpenAI's GPT models or Claude, using your own API key). Sentences come from a stored bank of about 16,000 and are chosen to fit the characters and words you already know, taken from a Hanly progress export.
 
 It is a static web app with no server. It can be installed on an iPad from Safari (Share → Add to Home Screen) or used in any desktop browser.
 
