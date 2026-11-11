@@ -45,6 +45,7 @@ export function mergeStates(local, remote) {
   out.reviews = [...reviews.values()];
 
   // Weak points: keep the most recent mention of each.
+  out.disputes = unionBy(local.disputes || [], remote.disputes || [], (d) => d.t).sort((a, b) => b.t - a.t).slice(0, 100);
   const weak = new Map();
   for (const w of [...(local.weak || []), ...(remote.weak || [])]) {
     if (!weak.has(w.text) || w.at > weak.get(w.text).at) weak.set(w.text, w);

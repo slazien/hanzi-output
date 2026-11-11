@@ -23,3 +23,17 @@ What the build does:
 - Word meanings come from CC-CEDICT.
 
 `tools/themes.json` must list the same themes, in the same order, as `data/themes.js`.
+
+## Grader test set (`grader-eval/`)
+
+`cases.json` holds 40 learner answers with a known verdict: 15 correct and
+natural, 12 correct but unnatural (each with the convention it breaks) and 13
+wrong. `run.mjs` sends them through the same instructions and scoring the app
+uses (`js/grading.js`) and reports false alarms, missed flags, missed mistakes
+and how much the result changes between repeated runs.
+
+    OPENAI_API_KEY=... node tools/grader-eval/run.mjs gpt-6-luna 3
+
+Run it after any change to the grading instructions or scoring. Answers the
+learner disputed in the app are kept in the app's exported data under
+`disputes`, and are good candidates for new cases.

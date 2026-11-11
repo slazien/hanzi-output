@@ -291,6 +291,9 @@ export function intervalText(days) {
 export function suggestRating(grade) {
   if (grade.skipped || grade.score < 50) return "forgot";
   if (grade.score < PASS_SCORE) return "hard";
+  // Correct but not how a native speaker would say it: worth seeing again soon.
+  if (grade.naturalness === "unnatural" && grade.naturalnessSure) return "hard";
+  if (grade.naturalness === "unnatural" || grade.naturalness === "acceptable_marked") return "recalled";
   return grade.score >= 95 ? "easy" : "recalled";
 }
 
@@ -342,6 +345,7 @@ export function logAttempt(item, grade, rating, wasReview, gapBefore, now = Date
   if (hsk) entry.h = hsk;
   if (item.grammar) entry.g = item.grammar;
   const cats = [...new Set((grade.issues || []).map((i) => i.category).filter(Boolean))];
+  if (grade.naturalness === "unnatural" || (grade.naturalness === "acceptable_marked" && grade.naturalnessSure)) cats.push("natural");
   if (cats.length) entry.c = cats;
   if (grade.weak?.length) entry.w = grade.weak;
   if (wasReview) { entry.rv = 1; entry.iv = Math.round(gapBefore * 10) / 10; }
@@ -377,6 +381,32 @@ export function setLastRating(rating) {
   }
 }
 
+const gradeFields = (grade) => ({
+  score: grade.score,
+  verdict: grade.verdict,
+  corrected: grade.corrected,
+  strengths: grade.strengths,
+  issues: grade.issues,
+  note: grade.note,
+  meaning: grade.meaning,
+  accuracy: grade.accuracy,
+  naturalness: grade.naturalness,
+  naturalVersion: grade.naturalVersion,
+  naturalnessNote: grade.naturalnessNote,
+  naturalnessSure: grade.naturalnessSure,
+});
+
+// After a second opinion: replace the grade on the newest history entry and
+// keep both verdicts, so disputed cases can be reviewed and added to the
+// grader's test set.
+export function recordDispute(item, answer, before, after) {
+  if (state.history[0]) Object.assign(state.history[0], gradeFields(after), { disputed: true });
+  state.disputes = state.disputes || [];
+  state.disputes.unshift({ t: Date.now(), english: item.english, reference: item.chinese, answer, before: gradeFields(before), after: gradeFields(after) });
+  state.disputes.length = Math.min(state.disputes.length, 100);
+  save();
+}
+
 export function recordAttempt(item, answer, grade) {
   state.history.unshift({
     id: uid(),
@@ -392,12 +422,7 @@ export function recordAttempt(item, answer, grade) {
     grammar: item.grammar || "",
     answer,
     review: Boolean(item.reviewId),
-    score: grade.score,
-    verdict: grade.verdict,
-    corrected: grade.corrected,
-    strengths: grade.strengths,
-    issues: grade.issues,
-    note: grade.note,
+    ...gradeFields(grade),
   });
   save();
 }

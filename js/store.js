@@ -27,6 +27,7 @@ export const DEFAULTS = {
   extraWords: [], // words the user marked as known in this app
   log: [], // compact line per rated attempt: { t, sc, r, th, h, g, c, w, rv, iv }
   knownLog: [], // [{ t, chars, words }] when the known counts change
+  disputes: [], // grades the learner disagreed with: [{ t, english, reference, answer, before, after }]
   weak: [], // words and patterns recently got wrong: [{ text, at }]
   reviews: [], // low-scoring sentences scheduled to come back
   history: [], // newest first
