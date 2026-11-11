@@ -4,6 +4,7 @@
 import { state, save } from "./store.js";
 import { buildKnown, hskAllowed, measure, measureWords, sentenceHsk, hanChars } from "./known.js";
 import { generateSentences, ClaudeError } from "./claude.js";
+import { ALL_THEMES } from "../data/themes.js";
 
 export const PASS_SCORE = 80;
 const REVIEW_DAYS = [1, 3, 7, 14];
@@ -11,6 +12,14 @@ const DAY = 24 * 60 * 60 * 1000;
 const MAX_ROUNDS = 3;
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+function shuffle(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 const squash = (s) => String(s || "").replace(/\s+/g, "");
 
 export function dueReviews(now = Date.now()) {
@@ -62,6 +71,9 @@ export async function buildSession(onProgress = () => {}) {
       maxNewWordsPct: s.maxNewWordsPct,
       hskLabel: hskLabel(),
       grammar: s.grammar,
+      theme: s.theme,
+      // For a random mix, draw the themes here so the spread is really random.
+      themes: s.theme ? null : shuffle(ALL_THEMES).slice(0, missing + 2),
       avoid: [...avoid, ...accepted.map((a) => a.english)],
       feedback,
     });
@@ -75,6 +87,7 @@ export async function buildSession(onProgress = () => {}) {
       const words = cleanWords(c);
       const item = {
         id: uid(), english: c.english.trim(), chinese: c.chinese.trim(), words, grammar: s.grammar,
+        theme: s.theme || (ALL_THEMES.includes(c.theme) ? c.theme : ""),
         note: String(c.note || "").trim(), hsk: sentenceHsk(c.chinese, s.hskScheme),
       };
       const overPct = m.pct > s.maxNewPct + 0.01;
@@ -113,6 +126,7 @@ export async function buildSession(onProgress = () => {}) {
     chinese: r.chinese,
     words: r.words || null,
     grammar: r.grammar || "",
+    theme: r.theme || "",
     note: r.note || "",
     hsk: sentenceHsk(r.chinese, s.hskScheme),
   }));
@@ -157,6 +171,7 @@ export function scheduleReview(item, score, now = Date.now()) {
       chinese: item.chinese,
       words: item.words,
       grammar: item.grammar,
+      theme: item.theme || "",
       note: item.note || "",
       step: 0,
       due: now + REVIEW_DAYS[0] * DAY,
@@ -176,6 +191,7 @@ export function recordAttempt(item, answer, grade) {
     words: item.words || null,
     sentenceNote: item.note || "",
     hsk: item.hsk || "",
+    theme: item.theme || "",
     grammar: item.grammar || "",
     answer,
     review: Boolean(item.reviewId),

@@ -17,6 +17,7 @@ export const DEFAULTS = {
     hskCap: 2, // 1-6, or 0 for no cap
     sessionLength: 10,
     grammar: "", // pattern text, "" = any
+    theme: "", // one theme, or "" for a random mix
   },
   onboarded: false, // first-run setup finished or skipped
   hanly: null, // { importedAt, fileName, entries: { key: progressPercent } }

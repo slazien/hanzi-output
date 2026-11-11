@@ -96,6 +96,7 @@ const SENTENCES_SCHEMA = obj({
       chinese: str,
       words: { type: "array", items: obj({ text: str, pinyin: str, gloss: str }) },
       note: str,
+      theme: str,
     }),
   },
 });
@@ -116,10 +117,11 @@ For each exercise give:
 - "chinese": the most natural simplified Chinese translation, with normal Chinese punctuation.
 - "words": the Chinese sentence split into words in order, each with tone-marked pinyin and a short English gloss that fits this sentence. Give punctuation its own entry with empty pinyin and gloss. Joined together, the "text" values must reproduce "chinese" exactly.
 - "note": one short sentence for the learner pointing out the key grammar point, word order or word choice in the Chinese sentence. Use "" when there is nothing worth pointing out.
+- "theme": the theme the sentence belongs to, copied exactly from the theme or theme list given in the request.
 
 The learner's known characters and words are hard constraints, described in each request. Count characters and words in your Chinese sentence before you answer, and rewrite any sentence that breaks the limit. Sentences must still be correct, natural Chinese that a native speaker would say; prefer a simpler idea over an awkward sentence. Vary the subjects, situations and sentence types across the set.`;
 
-export async function generateSentences({ model, count, known, knownWords, maxNewPct, maxNewWordsPct, hskLabel, grammar, avoid, feedback }) {
+export async function generateSentences({ model, count, known, knownWords, maxNewPct, maxNewWordsPct, hskLabel, grammar, theme, themes, avoid, feedback }) {
   const lines = [
     `Write ${count} exercises.`,
     "",
@@ -150,6 +152,11 @@ export async function generateSentences({ model, count, known, knownWords, maxNe
     lines.push(`Every sentence must need this grammar pattern in its Chinese translation: ${grammar}`);
   } else {
     lines.push("Use a mix of everyday grammar suited to this vocabulary.");
+  }
+  if (theme) {
+    lines.push(`Theme: every sentence must be about "${theme}". Cover different situations within that theme.`);
+  } else if (themes?.length) {
+    lines.push(`Themes: give each sentence a different theme, in this order where the vocabulary allows: ${themes.join("; ")}.`);
   }
   if (avoid?.length) {
     lines.push("", "Do not repeat or closely paraphrase these recent sentences:", ...avoid.map((s) => `- ${s}`));
