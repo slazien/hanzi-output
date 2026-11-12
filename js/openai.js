@@ -7,7 +7,7 @@ import { getApiKey, cleanApiKey } from "./store.js";
 const URL = "https://api.openai.com/v1/responses";
 
 // Release number of this file; Settings compares it with the main script's.
-export const OPENAI_MODULE_VERSION = 25;
+export const OPENAI_MODULE_VERSION = 26;
 
 export async function askOpenAI({ model, system, messages, effort, schema }, fail) {
   // Spaces and invisible characters saved with an older version are dropped here.
