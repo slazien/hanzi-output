@@ -3,6 +3,16 @@
 // test harness in tools/ can use exactly what the app uses.
 
 import { CATEGORIES } from "./insight.js";
+import { GRAMMAR } from "../data/grammar.js";
+
+// The grammar patterns a sentence uses that come with a rule (`tip`), the
+// more advanced first. `chosen` is a pattern picked for the session.
+const NOTED = GRAMMAR.filter((x) => x.tip).map((x) => ({ ...x, test: new RegExp(x.re) })).sort((a, b) => b.level - a.level);
+export function patternNotes(chinese, chosen = "", limit = 5) {
+  const hits = NOTED.filter((x) => x.pattern === chosen || x.test.test(chinese));
+  hits.sort((a, b) => (b.pattern === chosen) - (a.pattern === chosen));
+  return hits.slice(0, limit).map(({ pattern, name, structure, tip }) => ({ pattern, name, structure, tip }));
+}
 
 // Conventions where a sentence can be grammatical yet not what a native
 // speaker would say. The grader must name one of these to flag naturalness.
@@ -86,12 +96,17 @@ Examples of naturalness judgements (the learner's answer is grammatical in every
 
 Write explanations in English. Be accurate and direct. Do not praise wrong answers, and do not invent problems in correct ones.`;
 
-export function gradeRequest({ english, reference, answer, grammar, dispute }) {
+export function gradeRequest({ english, reference, answer, grammar, dispute, useNotes = true }) {
+  // Rules are given only for patterns the learner's own answer uses, so a
+  // correct answer worded differently from the reference is not held to them.
+  const used = new Set(patternNotes(answer, "", 99).map((n) => n.pattern));
+  const notes = useNotes ? patternNotes(reference, grammar).filter((n) => n.pattern === grammar || used.has(n.pattern)) : [];
   return [
     `English sentence: ${english}`,
     `Reference translation (one valid answer): ${reference}`,
     grammar ? `Grammar pattern being practised: ${grammar}` : "",
     `Learner's answer: ${answer}`,
+    notes.length ? `Rules for patterns the answer uses (use them to check and explain real mistakes; do not report a mistake only because the answer is worded differently from the reference, and a rule's example is not the only correct form):\n${notes.map((n) => `- ${n.pattern} (${n.structure}): ${n.tip}`).join("\n")}` : "",
     dispute ? `The learner disagrees with an earlier grading of this answer, which said: "${dispute}". Grade it again from scratch and independently. Check especially whether the answer is in fact acceptable, and whether each problem you report is real.` : "",
   ].filter(Boolean).join("\n");
 }
