@@ -10,7 +10,7 @@ import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, wee
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 25;
+const APP_VERSION = 26;
 
 const main = document.getElementById("main");
 
@@ -1136,7 +1136,7 @@ function progressView() {
       h("h3", {}, "Days practised, last 12 weeks"),
       h("div", { class: "cal", role: "img", "aria-label": "Sentences practised on each of the last 84 days" },
         cal.map((d) => h("i", { class: `cal-day l${d.n === 0 ? 0 : Math.min(4, 1 + Math.floor((d.n / calMax) * 3))}`, title: `${new Date(d.date).toLocaleDateString([], { month: "short", day: "numeric" })}: ${d.n}` }))),
-      h("p", { class: "muted small" }, `Oldest at the top left, today at the bottom right. Darker means more sentences. ${cal.filter((d) => d.n).length} of 84 days practised.`)),
+      h("p", { class: "muted small" }, `Oldest at the top left, today at the bottom right. A stronger colour means more sentences. ${cal.filter((d) => d.n).length} of 84 days practised.`)),
 
     h("section", { class: "card" },
       h("h2", {}, "Characters and words"),

@@ -461,8 +461,8 @@ ul.points li { margin-bottom: 4px; }
 .table td { padding: 8px 8px 8px 0; border-bottom: 1px solid var(--line); }
 .table th:not(:first-child), .table td:not(:first-child) { text-align: right; padding-right: 0; padding-left: 8px; white-space: nowrap; }
 
-.cal { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; max-width: 420px; margin: 6px 0 8px; }
-.cal-day { display: block; aspect-ratio: 1; border-radius: 4px; background: var(--soft); }
+.cal { display: grid; grid-template-rows: repeat(7, 1fr); grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; margin: 6px 0 8px; }
+.cal-day { display: block; height: 22px; border-radius: 4px; background: var(--soft); }
 .cal-day.l1 { background: color-mix(in srgb, var(--ink) 25%, var(--soft)); }
 .cal-day.l2 { background: color-mix(in srgb, var(--ink) 45%, var(--soft)); }
 .cal-day.l3 { background: color-mix(in srgb, var(--ink) 70%, var(--soft)); }
