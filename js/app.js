@@ -3,14 +3,14 @@ import { parseHanly, buildKnown, isHan, hanChars, hskLevelOf, hskAllowed, isKnow
 import { MODELS, DEFAULT_MODEL, PROVIDERS, providerOf, gradeAnswer, followUp, testConnection, MODULE_VERSION } from "./claude.js";
 import { buildSession, dueReviews, scheduleReview, recordAttempt, setLastRating, addWeak, easeWeak, countFitting, hskLabel, PASS_SCORE, RATINGS, previewInterval, intervalText, suggestRating, logAttempt, reviewsLeftToday, recordDispute } from "./session.js";
 import { GRAMMAR } from "../data/grammar.js";
-import { MEANING_LABEL, ACCURACY_LABEL, NATURALNESS_LABEL, CONVENTIONS } from "./grading.js";
+import { MEANING_LABEL, ACCURACY_LABEL, NATURALNESS_LABEL, patternNotes } from "./grading.js";
 import { loadBank, bankReady, creditOf, fitting } from "./bank.js";
 import { accountsEnabled, emailSignIn, status as syncStatus, initSync, onSyncChange, signInWithGoogle, sendEmailCode, verifyEmailCode, signOut, syncNow, deleteSynced } from "./sync.js";
 import { weakAreas, recallRate, weeklyScores, breakdown, forecast, calendar, weekDays, sessionNotes, CATEGORY_LABELS as CATEGORIES } from "./insight.js";
 import { THEMES, ALL_THEMES } from "../data/themes.js";
 
 // Shown at the bottom of Settings, to tell which release a device is running.
-const APP_VERSION = 24;
+const APP_VERSION = 25;
 
 const main = document.getElementById("main");
 
@@ -476,7 +476,7 @@ function hintsFor(item) {
   const out = [];
   const name = item.grammar || (item.patterns || [])[0];
   const g = name && GRAMMAR.find((x) => x.pattern === name);
-  out.push({ cap: "recalled", node: [label("Shape: "), `${words.length} ${words.length === 1 ? "word" : "words"}`, g ? [", using ", zh(g.pattern), ` (${g.name})`] : ""] });
+  out.push({ cap: "recalled", node: [label("Shape: "), `${words.length} ${words.length === 1 ? "word" : "words"}`, g ? [", using ", zh(g.pattern), ` (${g.name})`, g.structure ? [h("br"), label("Pattern: "), g.structure] : ""] : ""] });
   // One key word: a new word if there is one, otherwise the most advanced.
   const weight = (w) => (isKnownWord(w.text, known) ? 0 : 100) + Math.max(...hanChars(w.text).map((c) => hskLevelOf(c, state.settings.hskScheme) || 8)) * 10 + hanChars(w.text).length;
   const key = words.slice(1).filter((w) => w.gloss).sort((a, b) => weight(b) - weight(a))[0];
@@ -778,7 +778,9 @@ function feedbackView() {
   };
   if (cur.pending) { question.value = cur.pending; cur.pending = ""; }
 
-  const more = grade.strengths.length || grade.note || item.note;
+  // The patterns this sentence practises, with their rules.
+  const patterns = patternNotes(item.chinese, item.grammar, 3);
+  const more = grade.strengths.length || grade.note || item.note || patterns.length;
 
   return h("section", { class: "card" },
     progressBar(),
@@ -810,7 +812,9 @@ function feedbackView() {
       h("summary", {}, "More feedback"),
       item.note && [h("h3", {}, "About this sentence"), h("p", {}, item.note)],
       grade.strengths.length ? [h("h3", {}, "What worked"), h("ul", { class: "points" }, grade.strengths.map((t) => h("li", {}, t)))] : null,
-      grade.note && [h("h3", {}, "For next time"), h("p", {}, grade.note)]) : null,
+      grade.note && [h("h3", {}, "For next time"), h("p", {}, grade.note)],
+      patterns.length ? [h("h3", {}, "Grammar in this sentence"),
+        h("ul", { class: "points patterns" }, patterns.map((n) => h("li", {}, h("b", { class: "hanzi", lang: "zh-Hans" }, n.pattern), ` — ${n.name}`, h("div", { class: "muted" }, n.structure), h("div", {}, n.tip))))] : null) : null,
 
     !grade.skipped && h("p", { class: "dispute" },
       cur.disputed

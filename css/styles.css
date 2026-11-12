@@ -544,3 +544,4 @@ ul.points.recovered { list-style: none; padding-left: 0; }
 ul.points.recovered li { margin-bottom: 8px; }
 .spot + .row, .line-zh + .row { margin-top: 16px; }
 ul.points + .goal { margin-top: 14px; }
+ul.points.patterns li { margin-bottom: 12px; }

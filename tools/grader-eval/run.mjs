@@ -24,7 +24,7 @@ const tmp = mkdtempSync(join(tmpdir(), "grader-eval-"));
 // curl is used so the request goes through any HTTPS proxy configured in the environment.
 function grade(c, n) {
   const body = {
-    model, instructions: GRADE_SYSTEM, input: [{ role: "user", content: gradeRequest(c) }],
+    model, instructions: GRADE_SYSTEM, input: [{ role: "user", content: gradeRequest({ ...c, useNotes: !process.argv.includes("--no-notes") }) }],
     max_output_tokens: 16000, reasoning: { effort: "medium" }, store: false,
     text: { format: { type: "json_schema", name: "result", strict: true, schema: GRADE_SCHEMA } },
   };
